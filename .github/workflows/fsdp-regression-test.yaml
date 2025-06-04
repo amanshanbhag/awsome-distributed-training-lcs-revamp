@@ -10,7 +10,7 @@ on:
   workflow_dispatch:
     inputs:
       model_config:
-        description: 'Model configuration to use (egs. llama2_7b)'
+        description: 'Model configuration to use (egs. llama2_7b). Make sure this file is defined in /awsome-distributed-training/3.test_cases/pytorch/FSDP/models/<model_config>.txt'
         required: true
         default: 'llama2_7b'
         type: string
@@ -58,7 +58,6 @@ jobs:
           source env/bin/activate
           pip install -U wheel setuptools
           pip install -r src/requirements.txt
-          mkdir -p checkpoints
           echo "Virtual environment created successfully!"
 
       - name: Create regression test script
@@ -101,8 +100,6 @@ jobs:
           # Change to the working directory
           cd \$WORKING_DIR
           
-          mkdir -p logs checkpoints
-
           # Activate the virtual environment using the full path
           source \$WORKING_DIR/env/bin/activate
                                         
@@ -134,12 +131,17 @@ jobs:
           while IFS= read -r line || [ -n "\$line" ]; do
             [[ -z "\$line" || "\$line" =~ ^[[:space:]]*# ]] && continue
 
-            if [[ "\$line" == *"--checkpoint_dir="* ]]; then
+            # Strip comments!!!
+            cleaned_line="\${line%%#*}"
+            cleaned_line="\$(echo "\$cleaned_line" | sed 's/[[:space:]]*$//')"
+
+            [[ -z "\$cleaned_line" ]] && continue
+
+            if [[ "\$cleaned_line" == *"--checkpoint_dir="* ]]; then
               TRAINING_ARGS+=("--checkpoint_dir=${{ env.CHECKPOINT_DIR }}")
             else
-              TRAINING_ARGS+=("\$line")
+              TRAINING_ARGS+=("\$cleaned_line")
             fi
-
 
           done < "\$CONFIG_FILE"
 
