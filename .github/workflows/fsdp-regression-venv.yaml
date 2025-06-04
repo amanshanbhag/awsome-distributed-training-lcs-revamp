@@ -28,7 +28,7 @@ on:
           - p6
 jobs:
   regression:
-    runs-on: [self-hosted, ${{ github.event.inputs.cluster || 'p5' }}]
+    runs-on: ${{ fromJSON('["self-hosted", "' + (github.event.inputs.cluster || 'p5') + '"]') }}
     timeout-minutes: 360  # 6 hours for the full Llama 2 test
     env:
       USER_NAME: amanrsh
