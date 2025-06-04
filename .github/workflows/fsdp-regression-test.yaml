@@ -65,9 +65,10 @@ jobs:
           set -ex;
 
           GPUS_PER_NODE=8
+          WORKING_DIR=$TEST_DIR  # Use the actual test directory
 
           export DATA_PATH=/fsx
-          export FSX_MOUNT=$(pwd):$DATA_PATH
+          export FSX_MOUNT=\$WORKING_DIR:\$DATA_PATH
 
           export FI_LOG_LEVEL=warn
           export NCCL_DEBUG=info
@@ -79,13 +80,18 @@ jobs:
           export HF_HUB_ETAG_TIMEOUT=60
 
           # Debug information
-          echo "Current directory: $(pwd)"
+          echo "Current directory: \$(pwd)"
+          echo "Working directory: \$WORKING_DIR"
           ls -la
-          echo "Python version: $(python3 --version)"
+          echo "Python version: \$(python3 --version)"
+          
+          # Change to the working directory
+          cd \$WORKING_DIR
           
           mkdir -p logs checkpoints
 
-          source ./env/bin/activate
+          # Activate the virtual environment using the full path
+          source \$WORKING_DIR/env/bin/activate
                                         
           # Check if torchrun is available
           which torchrun || {
@@ -95,15 +101,15 @@ jobs:
           }
 
           declare -a TORCHRUN_ARGS=(
-              --nproc_per_node=$GPUS_PER_NODE
-              --nnodes=$SLURM_JOB_NUM_NODES
-              --rdzv_id=$SLURM_JOB_ID
+              --nproc_per_node=\$GPUS_PER_NODE
+              --nnodes=\$SLURM_JOB_NUM_NODES
+              --rdzv_id=\$SLURM_JOB_ID
               --rdzv_backend=c10d
-              --rdzv_endpoint=$(hostname)
+              --rdzv_endpoint=\$(hostname)
           )
           
           export TORCHRUN=torchrun
-          export TRAIN_SCRIPT=./train.py
+          export TRAIN_SCRIPT=\$WORKING_DIR/src/train.py
 
           declare -a TRAINING_ARGS=(
               --max_context_width=4096
@@ -126,21 +132,23 @@ jobs:
               --offload_activations=1
           )
 
-          cd src
+          cd \$WORKING_DIR/src
           echo "Running training with torchrun"
-          srun -l ${TORCHRUN} "${TORCHRUN_ARGS[@]}" ${TRAIN_SCRIPT} "${TRAINING_ARGS[@]}"
-          exit $?
+          srun -l \${TORCHRUN} "\${TORCHRUN_ARGS[@]}" \${TRAIN_SCRIPT} "\${TRAINING_ARGS[@]}"
+          exit \$?
           EOF
           chmod +x $TEST_DIR/slurm/regression_test.sbatch
 
+
       - name: Run regression test
         id: run_test
+        working-directory: ${{ env.TEST_DIR }}
         continue-on-error: true
         run: |
           mkdir -p ${{ env.LOG_DIR }} ${{ env.CHECKPOINT_DIR }}
           chmod 755 ${{ env.LOG_DIR }} ${{ env.CHECKPOINT_DIR }}
           echo "Submitting Slurm job..."
-          sbatch --wait slurm/regression_test.sbatch
+          TEST_DIR=${{ env.TEST_DIR }} sbatch --wait slurm/regression_test.sbatch
           exit_code=$?
           echo "exit_code=$exit_code" >> $GITHUB_OUTPUT
           echo "Slurm job completed with exit code: $exit_code"
