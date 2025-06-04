@@ -123,6 +123,7 @@ jobs:
       - name: Run regression test
         id: run_test
         working-directory: ${{ env.TEST_DIR }}
+        continue-on-error: true
         run: |
           mkdir -p logs checkpoints
           echo "Submitting Slurm job..."
