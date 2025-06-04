@@ -8,7 +8,12 @@ on:
       - 'src/**'
       - 'slurm/**'
   workflow_dispatch:
-
+    inputs:
+      model_config:
+        description: 'Model configuration to use (egs. llama2_7b)'
+        required: true
+        default: 'llama2_7b'
+        type: string
 jobs:
   regression:
     runs-on: [self-hosted, p5]
@@ -25,9 +30,13 @@ jobs:
           LOG_DIR="${HOME_DIR}/regression-logs"
           CHECKPOINT_DIR="${HOME_DIR}/regression-checkpoints"
 
+          MODEL_CONFIG="${{ github.event.inputs.model_config || 'llama2_7b' }}"
+
           echo "HOME_DIR=$HOME_DIR" >> $GITHUB_ENV
           echo "LOG_DIR=$LOG_DIR" >> $GITHUB_ENV
           echo "CHECKPOINT_DIR=$CHECKPOINT_DIR" >> $GITHUB_ENV
+          echo "MODEL_CONFIG=$MODEL_CONFIG" >> $GITHUB_ENV
+          echo "Env vars set successfully!"
 
       - name: Create test directory
         run: |
@@ -35,10 +44,12 @@ jobs:
           cd $FSDP_DIR
           TEST_DIR="${{ env.HOME_DIR }}/regression-test-$(date +%s)"
           echo "TEST_DIR=$TEST_DIR" >> $GITHUB_ENV
-          mkdir -p $TEST_DIR/slurm $TEST_DIR/src/model_utils $TEST_DIR/logs $TEST_DIR/checkpoints
+          mkdir -p $TEST_DIR/slurm $TEST_DIR/src/model_utils $TEST_DIR/logs $TEST_DIR/checkpoints $TEST_DIR/models
           cp -r src/model_utils/* $TEST_DIR/src/model_utils/
           cp slurm/create_venv.sh $TEST_DIR/slurm/
           cp src/train.py src/requirements.txt $TEST_DIR/src/
+          cp -r models/* $TEST_DIR/models/
+          echo "Test directory created successfully!"
       
       - name: Create virtual environment
         working-directory: ${{ env.TEST_DIR }}
@@ -67,6 +78,7 @@ jobs:
           GPUS_PER_NODE=8
 
           WORKING_DIR=${{ env.TEST_DIR }}
+          MODEL_CONFIG=${{ env.MODEL_CONFIG }}
 
           export DATA_PATH=/fsx
           export FSX_MOUNT=\$WORKING_DIR:\$DATA_PATH
@@ -76,7 +88,7 @@ jobs:
           export FI_PROVIDER=efa
           export FI_EFA_USE_HUGE_PAGE=0
           export FI_EFA_SET_CUDA_SYNC_MEMOPS=0
-          export LD_PRELOAD=/usr/local/cuda-12.4/lib/libnccl.so
+          export LD_PRELOAD=/usr/local/cuda-12.8/lib/libnccl.so
           export NCCL_SOCKET_IFNAME=^docker,lo,veth,eth
           export HF_HUB_ETAG_TIMEOUT=60
 
@@ -112,26 +124,27 @@ jobs:
           export TORCHRUN=torchrun
           export TRAIN_SCRIPT=\$WORKING_DIR/src/train.py
 
-          declare -a TRAINING_ARGS=(
-              --max_context_width=4096
-              --num_key_value_heads=32
-              --intermediate_size=11008
-              --hidden_width=4096
-              --num_layers=32
-              --num_heads=32
-              --model_type=llama_v2
-              --tokenizer=hf-internal-testing/llama-tokenizer
-              --checkpoint_freq=50
-              --validation_freq=5
-              --max_steps=100
-              --checkpoint_dir=${{ env.CHECKPOINT_DIR }}
-              --dataset=allenai/c4
-              --dataset_config_name=en
-              --train_batch_size=1
-              --val_batch_size=1
-              --sharding_strategy=full
-              --offload_activations=1
-          )
+          CONFIG_FILE=\$WORKING_DIR/models/\${MODEL_CONFIG}.txt
+          if [ ! -f \$CONFIG_FILE ]; then
+            echo "Config file \$CONFIG_FILE does not exist!"
+            exit 1
+          fi
+
+          TRAINING_ARGS=()
+          while IFS= read -r line || [ -n "\$line" ]; do
+            [[ -z "\$line" || "\$line" =~ ^[[:space:]]*# ]] && continue
+
+            if [[ "\$line" == *"--checkpoint_dir="* ]]; then
+              TRAINING_ARGS+=("--checkpoint_dir=${{ env.CHECKPOINT_DIR }}")
+            else
+              TRAINING_ARGS+=("\$line")
+            fi
+
+
+          done < "\$CONFIG_FILE"
+
+          echo "Training arguments:"
+          printf "  %s\n" "\${TRAINING_ARGS[@]}"
 
           cd \$WORKING_DIR/src
           echo "Running training with torchrun"
@@ -144,7 +157,6 @@ jobs:
       - name: Run regression test
         id: run_test
         working-directory: ${{ env.TEST_DIR }}
-        continue-on-error: true
         run: |
           mkdir -p ${{ env.LOG_DIR }} ${{ env.CHECKPOINT_DIR }}
           chmod 755 ${{ env.LOG_DIR }} ${{ env.CHECKPOINT_DIR }}
@@ -179,9 +191,11 @@ jobs:
           echo "Logs saved to ${{ env.LOG_DIR }}"
           echo "Checkpoints saved to ${{ env.CHECKPOINT_DIR }}"
 
-      
-      - name: Check test result
-        if: steps.run_test.outputs.exit_code != '0'
+      - name: Cleanup
+        if: success()
         run: |
-          echo "Regression test failed with exit code ${{ steps.run_test.outputs.exit_code }}"
-          exit 1
+          echo "Cleaning up..."
+          rm -rf ${{ env.TEST_DIR }}
+          echo "Test directory cleaned up successfully!"
+
+    
