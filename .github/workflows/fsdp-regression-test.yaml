@@ -19,17 +19,6 @@ jobs:
       - name: Checkout code
         uses: actions/checkout@v4
 
-      - name: Create test directory
-        run: |
-          FSDP_DIR=$(pwd)/3.test_cases/pytorch/FSDP
-          cd $FSDP_DIR
-          TEST_DIR=$(mktemp -d)
-          echo "TEST_DIR=$TEST_DIR" >> $GITHUB_ENV
-          mkdir -p $TEST_DIR/slurm $TEST_DIR/src/model_utils $TEST_DIR/logs $TEST_DIR/checkpoints
-          cp -r src/model_utils/* $TEST_DIR/src/model_utils/
-          cp slurm/create_venv.sh $TEST_DIR/slurm/
-          cp src/train.py src/requirements.txt $TEST_DIR/src/
-      
       - name: Set env vars
         run: |
           HOME_DIR="/home/${{ env.USER_NAME }}"
@@ -40,6 +29,17 @@ jobs:
           echo "LOG_DIR=$LOG_DIR" >> $GITHUB_ENV
           echo "CHECKPOINT_DIR=$CHECKPOINT_DIR" >> $GITHUB_ENV
 
+      - name: Create test directory
+        run: |
+          FSDP_DIR=$(pwd)/3.test_cases/pytorch/FSDP
+          cd $FSDP_DIR
+          TEST_DIR="${{ env.HOME_DIR }}/regression-test-$(date +%s)"
+          echo "TEST_DIR=$TEST_DIR" >> $GITHUB_ENV
+          mkdir -p $TEST_DIR/slurm $TEST_DIR/src/model_utils $TEST_DIR/logs $TEST_DIR/checkpoints
+          cp -r src/model_utils/* $TEST_DIR/src/model_utils/
+          cp slurm/create_venv.sh $TEST_DIR/slurm/
+          cp src/train.py src/requirements.txt $TEST_DIR/src/
+      
       - name: Create virtual environment
         working-directory: ${{ env.TEST_DIR }}
         run: |
@@ -65,7 +65,8 @@ jobs:
           set -ex;
 
           GPUS_PER_NODE=8
-          WORKING_DIR=$TEST_DIR  # Use the actual test directory
+
+          WORKING_DIR=${{ env.TEST_DIR }}
 
           export DATA_PATH=/fsx
           export FSX_MOUNT=\$WORKING_DIR:\$DATA_PATH
