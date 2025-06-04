@@ -19,6 +19,7 @@ jobs:
 
       - name: Create test directory
         run: |
+          pwd
           TEST_DIR=$(mktemp -d)
           echo "TEST_DIR=$TEST_DIR" >> $GITHUB_ENV
           mkdir -p $TEST_DIR/slurm $TEST_DIR/src/model_utils $TEST_DIR/logs
