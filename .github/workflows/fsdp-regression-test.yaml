@@ -13,6 +13,8 @@ jobs:
   regression:
     runs-on: [self-hosted, p5]
     timeout-minutes: 360  # 6 hours for the full Llama 2 test
+    env:
+      USER_NAME: amanrsh
     steps:
       - name: Checkout code
         uses: actions/checkout@v4
@@ -28,6 +30,16 @@ jobs:
           cp slurm/create_venv.sh $TEST_DIR/slurm/
           cp src/train.py src/requirements.txt $TEST_DIR/src/
       
+      - name: Set env vars
+        run: |
+          HOME_DIR="/home/${{ env.USER_NAME }}"
+          LOG_DIR="${HOME_DIR}/regression-logs"
+          CHECKPOINT_DIR="${HOME_DIR}/regression-checkpoints"
+
+          echo "HOME_DIR=$HOME_DIR" >> $GITHUB_ENV
+          echo "LOG_DIR=$LOG_DIR" >> $GITHUB_ENV
+          echo "CHECKPOINT_DIR=$CHECKPOINT_DIR" >> $GITHUB_ENV
+
       - name: Create virtual environment
         working-directory: ${{ env.TEST_DIR }}
         run: |
@@ -39,14 +51,15 @@ jobs:
           echo "Virtual environment created successfully!"
 
       - name: Create regression test script
+        working-directory: ${{ env.TEST_DIR }}
         run: |
-          cat > $TEST_DIR/slurm/regression_test.sbatch << 'EOF'
+          cat > $TEST_DIR/slurm/regression_test.sbatch << EOF
           #!/bin/bash
 
           #SBATCH --nodes=4
           #SBATCH --job-name=fsdp_regression_test
-          #SBATCH --output=logs/regression_test_%j.out
-          #SBATCH --error=logs/regression_test_%j.err
+          #SBATCH --output=${{ env.LOG_DIR }}/regression_test_%j.out
+          #SBATCH --error=${{ env.LOG_DIR }}/regression_test_%j.err
           #SBATCH --exclusive
 
           set -ex;
@@ -104,7 +117,7 @@ jobs:
               --checkpoint_freq=50
               --validation_freq=5
               --max_steps=100
-              --checkpoint_dir=./checkpoints
+              --checkpoint_dir=${{ env.CHECKPOINT_DIR }}
               --dataset=allenai/c4
               --dataset_config_name=en
               --train_batch_size=1
@@ -125,7 +138,8 @@ jobs:
         working-directory: ${{ env.TEST_DIR }}
         continue-on-error: true
         run: |
-          mkdir -p logs checkpoints
+          mkdir -p ${{ env.LOG_DIR }} ${{ env.CHECKPOINT_DIR }}
+          chmod 755 ${{ env.LOG_DIR }} ${{ env.CHECKPOINT_DIR }}
           echo "Submitting Slurm job..."
           sbatch --wait slurm/regression_test.sbatch
           exit_code=$?
@@ -137,14 +151,14 @@ jobs:
         working-directory: ${{ env.TEST_DIR }}
         run: |
           echo "Contents of logs directory:"
-          ls -la logs/ || echo "No logs directory found"
-          for log in logs/regression_test_*.out; do
+          ls -la ${{ env.LOG_DIR }}/ || echo "No logs directory found"
+          for log in ${{ env.LOG_DIR }}/regression_test_*.out; do
             if [ -f "$log" ]; then
               echo "=== Job Output ($log) ==="
               cat "$log"
             fi
           done
-          for log in logs/regression_test_*.err; do
+          for log in ${{ env.LOG_DIR }}/regression_test_*.err; do
             if [ -f "$log" ]; then
               echo "=== Job Error ($log) ==="
               cat "$log"
@@ -154,13 +168,9 @@ jobs:
       - name: Save logs
         if: always()
         run: |
-          if [ -d "${{ env.TEST_DIR }}/logs" ]; then
-            mkdir -p /tmp/regression-logs
-            cp -r ${{ env.TEST_DIR }}/logs/* /tmp/regression-logs/ || echo "No log files to copy"
-            echo "Logs saved to /tmp/regression-logs"
-          else
-            echo "No logs found in ${{ env.TEST_DIR }}/logs"
-          fi
+          echo "Logs saved to ${{ env.LOG_DIR }}"
+          echo "Checkpoints saved to ${{ env.CHECKPOINT_DIR }}"
+
       
       - name: Check test result
         if: steps.run_test.outputs.exit_code != '0'
