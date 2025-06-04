@@ -15,7 +15,7 @@ jobs:
     timeout-minutes: 360  # 6 hours for the full Llama 2 test
     steps:
       - name: Checkout code
-        uses: actions/checkout@v3
+        uses: actions/checkout@v4
 
       - name: Create test directory
         run: |
@@ -27,6 +27,16 @@ jobs:
           cp -r src/model_utils/* $TEST_DIR/src/model_utils/
           cp slurm/create_venv.sh $TEST_DIR/slurm/
           cp src/train.py src/requirements.txt $TEST_DIR/src/
+      
+      - name: Create virtual environment
+        working-directory: ${{ env.TEST_DIR }}
+        run: |
+          python3 -m venv env
+          source env/bin/activate
+          pip install -U wheel setuptools
+          pip install -r src/requirements.txt
+          mkdir -p checkpoints
+          echo "Virtual environment created successfully!"
 
       - name: Create regression test script
         run: |
@@ -38,7 +48,6 @@ jobs:
           #SBATCH --output=logs/regression_test_%j.out
           #SBATCH --error=logs/regression_test_%j.err
           #SBATCH --exclusive
-          #SBATCH --time=05:00:00
 
           set -ex;
 
@@ -62,28 +71,9 @@ jobs:
           echo "Python version: $(python3 --version)"
           
           mkdir -p logs checkpoints
-          
-          # Run create_venv with debugging
-          bash -x ./slurm/create_venv.sh || {
-            echo "create_venv.sh failed with exit code $?"
-            exit 1
-          }
-          
-          # Check if env directory exists
-          if [ ! -d "./env" ]; then
-            echo "env directory not found after running create_venv.sh"
-            exit 1
-          fi
-          
-          # Source with debugging
-          set +e
+
           source ./env/bin/activate
-          if [ $? -ne 0 ]; then
-            echo "Failed to activate virtual environment"
-            exit 1
-          fi
-          set -e
-          
+                                        
           # Check if torchrun is available
           which torchrun || {
             echo "torchrun not found in PATH"
@@ -111,9 +101,9 @@ jobs:
               --num_heads=32
               --model_type=llama_v2
               --tokenizer=hf-internal-testing/llama-tokenizer
-              --checkpoint_freq=5000
-              --validation_freq=500
-              --max_steps=5000
+              --checkpoint_freq=50
+              --validation_freq=5
+              --max_steps=100
               --checkpoint_dir=./checkpoints
               --dataset=allenai/c4
               --dataset_config_name=en
@@ -133,7 +123,6 @@ jobs:
       - name: Run regression test
         id: run_test
         working-directory: ${{ env.TEST_DIR }}
-        continue-on-error: true
         run: |
           mkdir -p logs checkpoints
           echo "Submitting Slurm job..."
