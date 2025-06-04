@@ -9,10 +9,10 @@ on:
       - 'slurm/**'
   workflow_dispatch:
 
-
 jobs:
   regression:
     runs-on: [self-hosted, p5]
+    timeout-minutes: 360  # 6 hours for the full Llama 2 test
     steps:
       - name: Checkout code
         uses: actions/checkout@v3
@@ -23,11 +23,10 @@ jobs:
           cd $FSDP_DIR
           TEST_DIR=$(mktemp -d)
           echo "TEST_DIR=$TEST_DIR" >> $GITHUB_ENV
-          mkdir -p $TEST_DIR/slurm $TEST_DIR/src/model_utils $TEST_DIR/logs
+          mkdir -p $TEST_DIR/slurm $TEST_DIR/src/model_utils $TEST_DIR/logs $TEST_DIR/checkpoints
           cp -r src/model_utils/* $TEST_DIR/src/model_utils/
           cp slurm/create_venv.sh $TEST_DIR/slurm/
           cp src/train.py src/requirements.txt $TEST_DIR/src/
-
 
       - name: Create regression test script
         run: |
@@ -36,9 +35,10 @@ jobs:
 
           #SBATCH --nodes=4
           #SBATCH --job-name=fsdp_regression_test
-          #SBATCH --output=logs/regression_test_%x_%j.out
-          #SBATCH --error=logs/regression_test_%x_%j.err
+          #SBATCH --output=logs/regression_test_%j.out
+          #SBATCH --error=logs/regression_test_%j.err
           #SBATCH --exclusive
+          #SBATCH --time=05:00:00
 
           set -ex;
 
@@ -56,9 +56,40 @@ jobs:
           export NCCL_SOCKET_IFNAME=^docker,lo,veth,eth
           export HF_HUB_ETAG_TIMEOUT=60
 
-          mkdir -p logs
-          ./slurm/create_venv.sh
+          # Debug information
+          echo "Current directory: $(pwd)"
+          ls -la
+          echo "Python version: $(python3 --version)"
+          
+          mkdir -p logs checkpoints
+          
+          # Run create_venv with debugging
+          bash -x ./slurm/create_venv.sh || {
+            echo "create_venv.sh failed with exit code $?"
+            exit 1
+          }
+          
+          # Check if env directory exists
+          if [ ! -d "./env" ]; then
+            echo "env directory not found after running create_venv.sh"
+            exit 1
+          fi
+          
+          # Source with debugging
+          set +e
           source ./env/bin/activate
+          if [ $? -ne 0 ]; then
+            echo "Failed to activate virtual environment"
+            exit 1
+          fi
+          set -e
+          
+          # Check if torchrun is available
+          which torchrun || {
+            echo "torchrun not found in PATH"
+            pip list | grep torch
+            exit 1
+          }
 
           declare -a TORCHRUN_ARGS=(
               --nproc_per_node=$GPUS_PER_NODE
@@ -86,31 +117,30 @@ jobs:
               --checkpoint_dir=./checkpoints
               --dataset=allenai/c4
               --dataset_config_name=en
-              --resume_from_checkpoint=./checkpoints
               --train_batch_size=1
               --val_batch_size=1
-              --sharding_strategy=full # https://pytorch.org/docs/stable/fsdp.html
+              --sharding_strategy=full
               --offload_activations=1
           )
 
           cd src
-          srun -l torchrun "${TORCHRUN_ARGS[@]}" ./train.py "${TRAINING_ARGS[@]}"
+          echo "Running training with torchrun"
+          srun -l ${TORCHRUN} "${TORCHRUN_ARGS[@]}" ${TRAIN_SCRIPT} "${TRAINING_ARGS[@]}"
           exit $?
           EOF
           chmod +x $TEST_DIR/slurm/regression_test.sbatch
 
       - name: Run regression test
+        id: run_test
         working-directory: ${{ env.TEST_DIR }}
+        continue-on-error: true
         run: |
-          mkdir -p logs
-          command -v sbatch
+          mkdir -p logs checkpoints
+          echo "Submitting Slurm job..."
           sbatch --wait slurm/regression_test.sbatch
           exit_code=$?
-          if [ $exit_code -ne 0 ]; then
-            echo "Regression test failed with exit code $exit_code"
-            exit $exit_code
-          fi
-          echo "Regression test passed"
+          echo "exit_code=$exit_code" >> $GITHUB_OUTPUT
+          echo "Slurm job completed with exit code: $exit_code"
 
       - name: List logs
         if: always()
@@ -118,20 +148,32 @@ jobs:
         run: |
           echo "Contents of logs directory:"
           ls -la logs/ || echo "No logs directory found"
+          for log in logs/regression_test_*.out; do
+            if [ -f "$log" ]; then
+              echo "=== Job Output ($log) ==="
+              cat "$log"
+            fi
+          done
+          for log in logs/regression_test_*.err; do
+            if [ -f "$log" ]; then
+              echo "=== Job Error ($log) ==="
+              cat "$log"
+            fi
+          done
 
       - name: Save logs
         if: always()
         run: |
-          if [ -d "${{ env.TEST_DIR }}/logs" ] && [ "$(ls -A ${{ env.TEST_DIR }}/logs/)" ]; then
+          if [ -d "${{ env.TEST_DIR }}/logs" ]; then
             mkdir -p /tmp/regression-logs
-            cp -r ${{ env.TEST_DIR }}/logs/* /tmp/regression-logs/
+            cp -r ${{ env.TEST_DIR }}/logs/* /tmp/regression-logs/ || echo "No log files to copy"
             echo "Logs saved to /tmp/regression-logs"
           else
             echo "No logs found in ${{ env.TEST_DIR }}/logs"
           fi
       
-      - name: Clean Up
-        if: always()
+      - name: Check test result
+        if: steps.run_test.outputs.exit_code != '0'
         run: |
-          rm -rf ${{ env.TEST_DIR }}
-
+          echo "Regression test failed with exit code ${{ steps.run_test.outputs.exit_code }}"
+          exit 1
