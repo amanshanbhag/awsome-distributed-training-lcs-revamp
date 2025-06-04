@@ -135,7 +135,6 @@ jobs:
 
       - name: Run regression test
         id: run_test
-        working-directory: ${{ env.TEST_DIR }}
         continue-on-error: true
         run: |
           mkdir -p ${{ env.LOG_DIR }} ${{ env.CHECKPOINT_DIR }}
