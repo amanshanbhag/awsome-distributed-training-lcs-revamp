@@ -108,12 +108,14 @@ jobs:
           fi
           echo "Regression test passed"
 
-      - name: Upload logs
+      - name: Save logs
         if: always()
-        uses: actions/upload-artifact@v3
-        with:
-          name: regression-test-logs
-          path: ${{ env.TEST_DIR }}/logs
+        run: |
+          if [ -d "${{ env.TEST_DIR }}/logs" ]; then
+            mkdir -p /tmp/regression-logs
+            cp -r ${{ env.TEST_DIR }}/logs/* /tmp/regression-logs/
+            echo "Logs saved to /tmp/regression-logs"
+          fi
       
       - name: Clean Up
         if: always()
