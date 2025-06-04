@@ -102,6 +102,8 @@ jobs:
       - name: Run regression test
         working-directory: ${{ env.TEST_DIR }}
         run: |
+          mkdir -p logs
+          command -v sbatch
           sbatch --wait slurm/regression_test.sbatch
           exit_code=$?
           if [ $exit_code -ne 0 ]; then
