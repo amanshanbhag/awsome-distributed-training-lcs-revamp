@@ -110,13 +110,22 @@ jobs:
           fi
           echo "Regression test passed"
 
+      - name: List logs
+        if: always()
+        working-directory: ${{ env.TEST_DIR }}
+        run: |
+          echo "Contents of logs directory:"
+          ls -la logs/ || echo "No logs directory found"
+
       - name: Save logs
         if: always()
         run: |
-          if [ -d "${{ env.TEST_DIR }}/logs" ]; then
+          if [ -d "${{ env.TEST_DIR }}/logs" ] && [ "$(ls -A ${{ env.TEST_DIR }}/logs/)" ]; then
             mkdir -p /tmp/regression-logs
             cp -r ${{ env.TEST_DIR }}/logs/* /tmp/regression-logs/
             echo "Logs saved to /tmp/regression-logs"
+          else
+            echo "No logs found in ${{ env.TEST_DIR }}/logs"
           fi
       
       - name: Clean Up
