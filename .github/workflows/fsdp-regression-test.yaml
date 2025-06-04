@@ -1,4 +1,4 @@
-name: FSDP Regression Test
+name: FSDP Regression Test (venv)
 
 on: 
   pull_request:
@@ -27,12 +27,17 @@ jobs:
       - name: Set env vars
         run: |
           HOME_DIR="/home/${{ env.USER_NAME }}"
-          LOG_DIR="${HOME_DIR}/regression-logs"
-          CHECKPOINT_DIR="${HOME_DIR}/regression-checkpoints"
+          TIMESTAMP=$(date +%s)
+          TEST_ROOT="${HOME_DIR}/regression-test-${TIMESTAMP}"
+          TEST_DIR="${TEST_ROOT}/test"
+          LOG_DIR="${TEST_ROOT}/regression-logs"
+          CHECKPOINT_DIR="${TEST_ROOT}/regression-checkpoints"
 
           MODEL_CONFIG="${{ github.event.inputs.model_config || 'llama2_7b' }}"
 
           echo "HOME_DIR=$HOME_DIR" >> $GITHUB_ENV
+          echo "TEST_ROOT=$TEST_ROOT" >> $GITHUB_ENV
+          echo "TEST_DIR=$TEST_DIR" >> $GITHUB_ENV
           echo "LOG_DIR=$LOG_DIR" >> $GITHUB_ENV
           echo "CHECKPOINT_DIR=$CHECKPOINT_DIR" >> $GITHUB_ENV
           echo "MODEL_CONFIG=$MODEL_CONFIG" >> $GITHUB_ENV
@@ -42,13 +47,13 @@ jobs:
         run: |
           FSDP_DIR=$(pwd)/3.test_cases/pytorch/FSDP
           cd $FSDP_DIR
-          TEST_DIR="${{ env.HOME_DIR }}/regression-test-$(date +%s)"
-          echo "TEST_DIR=$TEST_DIR" >> $GITHUB_ENV
-          mkdir -p $TEST_DIR/slurm $TEST_DIR/src/model_utils $TEST_DIR/logs $TEST_DIR/checkpoints $TEST_DIR/models
-          cp -r src/model_utils/* $TEST_DIR/src/model_utils/
-          cp slurm/create_venv.sh $TEST_DIR/slurm/
-          cp src/train.py src/requirements.txt $TEST_DIR/src/
-          cp -r models/* $TEST_DIR/models/
+          mkdir -p ${{ env.TEST_DIR }}/slurm ${{ env.TEST_DIR }}/src/model_utils ${{ env.TEST_DIR }}/models
+          mkdir -p ${{ env.LOG_DIR }} ${{ env.CHECKPOINT_DIR }}
+          chmod 755 ${{ env.LOG_DIR }} ${{ env.CHECKPOINT_DIR }}
+          cp -r src/model_utils/* ${{ env.TEST_DIR }}/src/model_utils/
+          cp slurm/create_venv.sh ${{ env.TEST_DIR }}/slurm/
+          cp src/train.py src/requirements.txt ${{ env.TEST_DIR }}/src/
+          cp -r models/* ${{ env.TEST_DIR }}/models/
           echo "Test directory created successfully!"
       
       - name: Create virtual environment
@@ -160,8 +165,6 @@ jobs:
         id: run_test
         working-directory: ${{ env.TEST_DIR }}
         run: |
-          mkdir -p ${{ env.LOG_DIR }} ${{ env.CHECKPOINT_DIR }}
-          chmod 755 ${{ env.LOG_DIR }} ${{ env.CHECKPOINT_DIR }}
           echo "Submitting Slurm job..."
           TEST_DIR=${{ env.TEST_DIR }} sbatch --wait slurm/regression_test.sbatch
           exit_code=$?
@@ -170,7 +173,6 @@ jobs:
 
       - name: List logs
         if: always()
-        working-directory: ${{ env.TEST_DIR }}
         run: |
           echo "Contents of logs directory:"
           ls -la ${{ env.LOG_DIR }}/ || echo "No logs directory found"
@@ -187,17 +189,11 @@ jobs:
             fi
           done
 
-      - name: Save logs
-        if: always()
-        run: |
-          echo "Logs saved to ${{ env.LOG_DIR }}"
-          echo "Checkpoints saved to ${{ env.CHECKPOINT_DIR }}"
-
       - name: Cleanup
         if: success()
         run: |
           echo "Cleaning up..."
-          rm -rf ${{ env.TEST_DIR }}
+          rm -rf ${{ env.TEST_ROOT }}
           echo "Test directory cleaned up successfully!"
 
     
