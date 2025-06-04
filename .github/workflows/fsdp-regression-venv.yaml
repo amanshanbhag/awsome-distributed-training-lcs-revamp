@@ -1,5 +1,7 @@
 name: FSDP Regression Test (venv)
 
+# TODO: Additional configuration options as inputs (egs. number of nodes (auto change num GPUs and EFA variables accordingly), add support for g* instances etc)
+
 on: 
   pull_request:
     paths:
@@ -14,9 +16,19 @@ on:
         required: true
         default: 'llama2_7b'
         type: string
+      cluster:
+        description: 'Cluster to run the test on (egs. p5)'
+        required: true
+        default: 'p5'
+        type: choice
+        options:
+          - p4de
+          - p5
+          - p5en
+          - p6
 jobs:
   regression:
-    runs-on: [self-hosted, p5]
+    runs-on: [self-hosted, ${{ github.event.inputs.cluster || 'p5' }}]
     timeout-minutes: 360  # 6 hours for the full Llama 2 test
     env:
       USER_NAME: amanrsh
