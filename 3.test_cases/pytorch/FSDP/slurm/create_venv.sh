@@ -17,7 +17,7 @@ else
 fi
 
 # Deleting for gh actions (on fork only!!!), since github user doesn't have sudo. Assume venv already installed on PC
-sudo apt install -y python$PYTHON_VERSION-venv
+# sudo apt install -y python$PYTHON_VERSION-venv
 
 # Create and actiate Python virtual environment
 $PYTHON_V -m venv env
