@@ -1,6 +1,6 @@
 name: FSDP Regression Test (venv)
 
-# TODO: Additional test cases to matrix
+# TODO: Additional test cases to matrix. Change max-parallel.
 
 on: 
   pull_request:
@@ -15,8 +15,8 @@ jobs:
       fail-fast: true
       max-parallel: 1
       matrix:
-        model_config: [llama2_7b]
         cluster: [p5]
+        model_config: [llama2_7b, llama2_13b, llama2_70b]        
     runs-on: [self-hosted, "${{ matrix.cluster }}"]
     timeout-minutes: 360  # 6 hours for the full Llama 2 test
     steps:
@@ -74,6 +74,7 @@ jobs:
           sed -i "s|--checkpoint_dir=./checkpoints|--checkpoint_dir=${{ env.CHECKPOINT_DIR }}|g" "$TMP_SBATCH"
 
           echo "Submitting Slurm job..."
+          cd ../src
           sbatch --wait $TMP_SBATCH
           exit_code=$?
           echo "exit_code=$exit_code" >> $GITHUB_OUTPUT
@@ -90,3 +91,11 @@ jobs:
           name: regression-logs-${{ github.run_id }}-${{ matrix.model_config }}-${{ matrix.cluster }}
           path: ${{ env.LOG_DIR }}
           retention-days: 7
+
+      - name: Cleanup
+        if: always()
+        run: |
+          echo "Cleaning up..."
+          rm -rf ${{ env.LOG_DIR }} ${{ env.CHECKPOINT_DIR }}
+          echo "Logs and checkpoints cleaned up successfully!"
+    
