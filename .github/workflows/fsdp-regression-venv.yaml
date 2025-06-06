@@ -38,6 +38,7 @@ jobs:
 
       - name: Set env vars
         run: |
+          echo "Checked out at: $(pwd)"
           HOME_DIR="/home/${{ env.USER_NAME }}"
           TIMESTAMP=$(date +%s)
           TEST_ROOT="${HOME_DIR}/regression-test-${TIMESTAMP}"
