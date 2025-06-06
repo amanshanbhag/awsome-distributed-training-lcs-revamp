@@ -90,11 +90,3 @@ jobs:
           name: regression-logs-${{ github.run_id }}-${{ matrix.model_config }}-${{ matrix.cluster }}
           path: ${{ env.LOG_DIR }}
           retention-days: 7
-
-      - name: Cleanup
-        if: always()
-        run: |
-          echo "Cleaning up..."
-          rm -rf ${{ env.LOG_DIR }} ${{ env.CHECKPOINT_DIR }}
-          echo "Logs and checkpoints cleaned up successfully!"
-    
