@@ -5,10 +5,8 @@ name: FSDP Regression Test (venv)
 on: 
   pull_request:
     paths:
-      - 'FSDP/**'
-      - 'models/**'
-      - 'src/**'
-      - 'slurm/**'
+      - '3.test_cases/pytorch/FSDP/**'
+
   workflow_dispatch:
     inputs:
       model_config:
@@ -30,48 +28,37 @@ jobs:
   regression:
     runs-on: [self-hosted, "${{ github.event.inputs.cluster || 'p5' }}"]
     timeout-minutes: 360  # 6 hours for the full Llama 2 test
-    env:
-      USER_NAME: amanrsh
     steps:
       - name: Checkout code
         uses: actions/checkout@v4
+        with:
+          path: ${{ github.run_id }}
 
       - name: Set env vars
         run: |
-          echo "Checked out at: $(pwd)"
-          echo "GitHub run id: ${{ github.run_id }}"
-          HOME_DIR="/home/${{ env.USER_NAME }}"
-          TIMESTAMP=$(date +%s)
-          TEST_ROOT="${HOME_DIR}/regression-test-${TIMESTAMP}"
-          TEST_DIR="${TEST_ROOT}/test"
-          LOG_DIR="${TEST_ROOT}/regression-logs"
-          CHECKPOINT_DIR="${TEST_ROOT}/regression-checkpoints"
+          HOME_DIR="/home/github"
+          BUILD_ID="${{ github.run_id }}"
+          FSDP_DIR="$(pwd)/${BUILD_ID}/3.test_cases/pytorch/FSDP"
+          LOG_DIR="${HOME_DIR}/regression-logs-${BUILD_ID}"
+          CHECKPOINT_DIR="${HOME_DIR}/regression-checkpoints-${BUILD_ID}"
 
           MODEL_CONFIG="${{ github.event.inputs.model_config || 'llama2_7b' }}"
 
           echo "HOME_DIR=$HOME_DIR" >> $GITHUB_ENV
-          echo "TEST_ROOT=$TEST_ROOT" >> $GITHUB_ENV
-          echo "TEST_DIR=$TEST_DIR" >> $GITHUB_ENV
+          echo "BUILD_ID=$BUILD_ID" >> $GITHUB_ENV
+          echo "FSDP_DIR=$FSDP_DIR" >> $GITHUB_ENV
           echo "LOG_DIR=$LOG_DIR" >> $GITHUB_ENV
           echo "CHECKPOINT_DIR=$CHECKPOINT_DIR" >> $GITHUB_ENV
           echo "MODEL_CONFIG=$MODEL_CONFIG" >> $GITHUB_ENV
           echo "Env vars set successfully!"
 
-      - name: Create test directory
+      - name: Create test directories
         run: |
-          FSDP_DIR=$(pwd)/3.test_cases/pytorch/FSDP
-          cd $FSDP_DIR
-          mkdir -p ${{ env.TEST_DIR }}/slurm ${{ env.TEST_DIR }}/src/model_utils ${{ env.TEST_DIR }}/models
           mkdir -p ${{ env.LOG_DIR }} ${{ env.CHECKPOINT_DIR }}
           chmod 755 ${{ env.LOG_DIR }} ${{ env.CHECKPOINT_DIR }}
-          cp -r src/model_utils/* ${{ env.TEST_DIR }}/src/model_utils/
-          cp slurm/create_venv.sh ${{ env.TEST_DIR }}/slurm/
-          cp src/train.py src/requirements.txt ${{ env.TEST_DIR }}/src/
-          cp -r models/* ${{ env.TEST_DIR }}/models/
-          echo "Test directory created successfully!"
       
       - name: Create virtual environment
-        working-directory: ${{ env.TEST_DIR }}
+        working-directory: ${{ env.FSDP_DIR }}
         run: |
           python3 -m venv env
           source env/bin/activate
@@ -80,9 +67,9 @@ jobs:
           echo "Virtual environment created successfully!"
 
       - name: Create regression test script
-        working-directory: ${{ env.TEST_DIR }}
+        working-directory: ${{ env.FSDP_DIR }}
         run: |
-          cat > $TEST_DIR/slurm/regression_test.sbatch << EOF
+          cat > slurm/regression_test.sbatch << EOF
           #!/bin/bash
 
           #SBATCH --nodes=4
@@ -95,7 +82,7 @@ jobs:
 
           GPUS_PER_NODE=8
 
-          WORKING_DIR=${{ env.TEST_DIR }}
+          WORKING_DIR=${{ env.FSDP_DIR }}
           MODEL_CONFIG=${{ env.MODEL_CONFIG }}
 
           export DATA_PATH=/fsx
@@ -146,6 +133,9 @@ jobs:
             exit 1
           fi
 
+          # For future (like SMHP)
+          declare -a ARGS=()
+
           TRAINING_ARGS=()
           while IFS= read -r line || [ -n "\$line" ]; do
             [[ -z "\$line" || "\$line" =~ ^[[:space:]]*# ]] && continue
@@ -169,45 +159,38 @@ jobs:
 
           cd \$WORKING_DIR/src
           echo "Running training with torchrun"
-          srun -l \${TORCHRUN} "\${TORCHRUN_ARGS[@]}" \${TRAIN_SCRIPT} "\${TRAINING_ARGS[@]}"
+          srun -l \${ARGS[@]} \${TORCHRUN} "\${TORCHRUN_ARGS[@]}" \${TRAIN_SCRIPT} "\${TRAINING_ARGS[@]}"
           exit \$?
           EOF
-          chmod +x $TEST_DIR/slurm/regression_test.sbatch
+          chmod +x slurm/regression_test.sbatch
 
 
       - name: Run regression test
         id: run_test
-        working-directory: ${{ env.TEST_DIR }}
+        working-directory: ${{ env.FSDP_DIR }}
         run: |
           echo "Submitting Slurm job..."
-          TEST_DIR=${{ env.TEST_DIR }} sbatch --wait slurm/regression_test.sbatch
+          sbatch --wait slurm/regression_test.sbatch
           exit_code=$?
           echo "exit_code=$exit_code" >> $GITHUB_OUTPUT
           echo "Slurm job completed with exit code: $exit_code"
-
-      - name: List logs
+          if [ $exit_code -ne 0 ]; then
+            echo "Slurm job failed with exit code: $exit_code"
+            exit $exit_code
+          fi
+      
+      - name: Upload logs as artifacts
         if: always()
-        run: |
-          echo "Contents of logs directory:"
-          ls -la ${{ env.LOG_DIR }}/ || echo "No logs directory found"
-          for log in ${{ env.LOG_DIR }}/regression_test_*.out; do
-            if [ -f "$log" ]; then
-              echo "=== Job Output ($log) ==="
-              cat "$log"
-            fi
-          done
-          for log in ${{ env.LOG_DIR }}/regression_test_*.err; do
-            if [ -f "$log" ]; then
-              echo "=== Job Error ($log) ==="
-              cat "$log"
-            fi
-          done
+        uses: actions/upload-artifact@v4
+        with:
+          name: regression-logs-${{ github.run_id }}
+          path: ${{ env.LOG_DIR }}
+          retention-days: 7
 
       - name: Cleanup
-        if: success()
+        if: always()
         run: |
           echo "Cleaning up..."
-          rm -rf ${{ env.TEST_ROOT }}
-          echo "Test directory cleaned up successfully!"
-
+          rm -rf ${{ env.LOG_DIR }} ${{ env.CHECKPOINT_DIR }}
+          echo "Logs and checkpoints cleaned up successfully!"
     
