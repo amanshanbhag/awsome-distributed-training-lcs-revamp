@@ -133,6 +133,7 @@ jobs:
           echo "Monitoring job ${{ env.JOB_NAME }}..."
           start_time=$(date +%s)
           timeout=21600
+          exit_code=0
 
           while true; do
             current_time=$(date +%s)
@@ -144,6 +145,15 @@ jobs:
               break
             fi
 
+            # Check for error conditions in pods
+            container_statuses=$(kubectl get pods -l app=${{ env.JOB_NAME }} -o jsonpath='{.items[*].status.containerStatuses[*].state}' 2>/dev/null)
+            if echo "$container_statuses" | grep -q "CrashLoopBackOff\|ImagePullBackOff\|ErrImagePull"; then
+              echo "Error detected in container status"
+              exit_code=1
+              break
+            fi
+
+            # Check PyTorchJob status
             job_status=$(kubectl get pytorchjob ${{ env.JOB_NAME }} -o jsonpath='{.status.conditions[0].type}' 2>/dev/null)
             if [ "$job_status" == "Succeeded" ]; then
               echo "Job completed successfully!"
@@ -155,7 +165,10 @@ jobs:
               break
             fi
 
-            echo "Job still running... (elapsed: $elapsed_time)"
+            # Display current status
+            running_pods=$(kubectl get pods -l app=${{ env.JOB_NAME }} -o jsonpath='{.items[?(@.status.phase=="Running")].metadata.name}' | wc -w)
+            total_pods=$(kubectl get pods -l app=${{ env.JOB_NAME }} | grep -v NAME | wc -l)
+            echo "Job status: $running_pods/$total_pods pods running (elapsed: $elapsed_time seconds)"
             sleep 60
           done
 
