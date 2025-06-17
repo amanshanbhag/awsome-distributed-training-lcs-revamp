@@ -140,6 +140,7 @@ jobs:
           start_time=$(date +%s)
           timeout=21600
           exit_code=0
+          expected_pods=${{ env.NUM_NODES }}
 
           while true; do
             current_time=$(date +%s)
@@ -153,8 +154,17 @@ jobs:
 
             # Check for error conditions in pods
             container_statuses=$(kubectl get pods -l app=${ACTUAL_JOB_NAME} -o jsonpath='{.items[*].status.containerStatuses[*].state}' 2>/dev/null)
+            pod_phases=$(kubectl get pods -l app=${ACTUAL_JOB_NAME} -o jsonpath='{.items[*].status.phase}' 2>/dev/null)
+
             if echo "$container_statuses" | grep -q "CrashLoopBackOff\|ImagePullBackOff\|ErrImagePull"; then
               echo "Error detected in container status"
+              exit_code=1
+              break
+            fi
+
+            # Check for error states in pod phases
+            if echo "$pod_phases" | grep -q "Failed\|Unknown\|Evicted"; then
+              echo "Error detected in pod phase"
               exit_code=1
               break
             fi
@@ -174,6 +184,18 @@ jobs:
             # Display current status
             running_pods=$(kubectl get pods -l app=${ACTUAL_JOB_NAME} -o jsonpath='{.items[?(@.status.phase=="Running")].metadata.name}' | wc -w)
             total_pods=$(kubectl get pods -l app=${ACTUAL_JOB_NAME} | grep -v NAME | wc -l)
+
+            # Check if all expected pods are running
+            if [ $total_pods -eq $expected_pods ] && [ $running_pods -eq $total_pods ]; then
+              echo "All expected pods ($expected_pods) are running"
+            elif [ $total_pods -lt $expected_pods ]; then
+              echo "Warning: Only $total_pods pods found, expected $expected_pods"
+            elif [ $running_pods -lt $total_pods ]; then
+              echo "Warning: Only $running_pods/$total_pods pods are running"
+              # List pods that aren't running
+              kubectl get pods -l app=${ACTUAL_JOB_NAME} -o jsonpath='{range .items[?(@.status.phase!="Running")]}{.metadata.name}{" is "}{.status.phase}{"\n"}{end}'
+            fi
+            
             echo "Job status: $running_pods/$total_pods pods running (elapsed: $elapsed_time seconds)"
             sleep 60
           done
