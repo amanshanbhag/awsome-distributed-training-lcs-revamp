@@ -121,14 +121,21 @@ jobs:
           echo "Waiting for pods to start..."   # Change this to logic that checks for when Status becomes "Running"
           
           # Fix job name (replace underscore with hyphen :) )
-          echo "JOB_NAME=${{ matrix.model_config }}-fsdp" >> $GITHUB_ENV
-          ACTUAL_JOB_NAME=$(echo ${{ env.JOB_NAME }} | tr '_' '-') 
+          JOB_NAME="${{ matrix.model_config }}-fsdp"
+          ACTUAL_JOB_NAME=$(echo $JOB_NAME | tr '_' '-')
+          echo "JOB_NAME=$JOB_NAME" >> $GITHUB_ENV
           echo "ACTUAL_JOB_NAME=$ACTUAL_JOB_NAME" >> $GITHUB_ENV
+          
+          echo "Job name: $JOB_NAME"
+          echo "Actual job name: $ACTUAL_JOB_NAME"
 
+          echo "Waiting for pods to start..."
           expected_pods=${{ env.NUM_NODES }}
 
           start_wait=$(date +%s)
           wait_timeout=600  
+
+          kubectl get pods
 
           while true; do
             current_time=$(date +%s)
@@ -139,6 +146,8 @@ jobs:
               kubectl get pods -l app=${ACTUAL_JOB_NAME}
               exit 1
             fi
+
+            echo "Current pods: $(kubectl get pods -l app=$ACTUAL_JOB_NAME)"
             
             # Count running and ready pods
             running_pods=$(kubectl get pods -l app=${ACTUAL_JOB_NAME} -o jsonpath='{.items[?(@.status.phase=="Running")].metadata.name}' | wc -w)
@@ -161,14 +170,11 @@ jobs:
               exit 1
             fi
             
-            sleep 10
+            sleep 5
           done
           
           echo "PyTorch Job Name: $(kubectl get pytorchjob)"
           echo "Job Pods: "kubectl get pods
-
-          # Store job name for future steps
-          echo "JOB_NAME=${{ matrix.model_config }}-fsdp" >> $GITHUB_ENV
 
       - name: Monitor training run 
         id: monitor_job
