@@ -141,6 +141,8 @@ jobs:
           timeout=21600
           exit_code=0
           expected_pods=${{ env.NUM_NODES }}
+          last_log_time=$(date +%s)
+          master_pod=""
 
           while true; do
             current_time=$(date +%s)
@@ -188,6 +190,23 @@ jobs:
             # Check if all expected pods are running
             if [ $total_pods -eq $expected_pods ] && [ $running_pods -eq $total_pods ]; then
               echo "All expected pods ($expected_pods) are running"
+              # Try to identify master pod and print logs if all pods are running
+              if [ -z "$master_pod" ] || [ $((current_time - last_log_time)) -gt 300 ]; then
+                echo "Finding master pod for logs..."
+                WORKER_POD_0=$(kubectl get pods -l app=${ACTUAL_JOB_NAME} -o name | head -1 | cut -d'/' -f2)
+                master_pod=$(kubectl logs $WORKER_POD_0 | grep master_addr= | head -1 | awk -F'=' '{print $2}' | tr -d '[:space:]')
+                
+                if [ -z "$master_pod" ]; then
+                  echo "Could not determine master pod, showing logs from first pod"
+                  master_pod=$WORKER_POD_0
+                fi
+                
+                echo "=== Recent logs from pod $master_pod ==="
+                kubectl logs $master_pod --tail=20
+                echo "=== End of logs ==="
+                
+                last_log_time=$current_time
+              fi
             elif [ $total_pods -lt $expected_pods ]; then
               echo "Warning: Only $total_pods pods found, expected $expected_pods"
             elif [ $running_pods -lt $total_pods ]; then
