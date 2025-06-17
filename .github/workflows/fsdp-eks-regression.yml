@@ -118,7 +118,7 @@ jobs:
           popd
 
           # Wait for training to start before monitoring
-          echo "Waiting for pods to start..."
+          echo "Waiting for pods to start..."   # Change this to logic that checks for when Status becomes "Running"
           sleep 30
           kubectl get pytorchjob
           kubectl get pods
@@ -131,6 +131,12 @@ jobs:
         run: |
           # Monitor until completion or err 
           echo "Monitoring job ${{ env.JOB_NAME }}..."
+
+          # Fix job name (replace underscore with hyphen :) )
+          ACTUAL_JOB_NAME=$(echo ${{ env.JOB_NAME }} | tr '_' '-')
+          echo "Actual job name: $ACTUAL_JOB_NAME"
+          echo "ACTUAL_JOB_NAME=$ACTUAL_JOB_NAME" >> $GITHUB_ENV
+
           start_time=$(date +%s)
           timeout=21600
           exit_code=0
@@ -146,7 +152,7 @@ jobs:
             fi
 
             # Check for error conditions in pods
-            container_statuses=$(kubectl get pods -l app=${{ env.JOB_NAME }} -o jsonpath='{.items[*].status.containerStatuses[*].state}' 2>/dev/null)
+            container_statuses=$(kubectl get pods -l app=${ACTUAL_JOB_NAME} -o jsonpath='{.items[*].status.containerStatuses[*].state}' 2>/dev/null)
             if echo "$container_statuses" | grep -q "CrashLoopBackOff\|ImagePullBackOff\|ErrImagePull"; then
               echo "Error detected in container status"
               exit_code=1
@@ -154,7 +160,7 @@ jobs:
             fi
 
             # Check PyTorchJob status
-            job_status=$(kubectl get pytorchjob ${{ env.JOB_NAME }} -o jsonpath='{.status.conditions[0].type}' 2>/dev/null)
+            job_status=$(kubectl get pytorchjob ${{ env.ACTUAL_JOB_NAME }} -o jsonpath='{.status.conditions[0].type}' 2>/dev/null)
             if [ "$job_status" == "Succeeded" ]; then
               echo "Job completed successfully!"
               exit_code=0
@@ -166,8 +172,8 @@ jobs:
             fi
 
             # Display current status
-            running_pods=$(kubectl get pods -l app=${{ env.JOB_NAME }} -o jsonpath='{.items[?(@.status.phase=="Running")].metadata.name}' | wc -w)
-            total_pods=$(kubectl get pods -l app=${{ env.JOB_NAME }} | grep -v NAME | wc -l)
+            running_pods=$(kubectl get pods -l app=${ACTUAL_JOB_NAME} -o jsonpath='{.items[?(@.status.phase=="Running")].metadata.name}' | wc -w)
+            total_pods=$(kubectl get pods -l app=${ACTUAL_JOB_NAME} | grep -v NAME | wc -l)
             echo "Job status: $running_pods/$total_pods pods running (elapsed: $elapsed_time seconds)"
             sleep 60
           done
@@ -187,12 +193,12 @@ jobs:
           echo "Finding master pod..."
 
           # Find the first worker pod to search for master_addr
-          WORKER_POD_0=$(kubectl get pods -l app=${{ env.JOB_NAME }} -o name | head -1 | cut -d'/' -f2)
+          WORKER_POD_0=$(kubectl get pods -l app=${{ env.ACTUAL_JOB_NAME }} -o name | head -1 | cut -d'/' -f2)
           MASTER_POD=$(kubectl logs $WORKER_POD_0 | grep master_addr= | head -1 | awk -F'=' '{print $2}' | tr -d '[:space:]')
 
           if [ -z "$MASTER_POD" ]; then
             echo "Could not determine master pod, collecting logs from all pods"
-            for pod in $(kubectl get pods -l app=${{ env.JOB_NAME }} -o name); do
+            for pod in $(kubectl get pods -l app=${{ env.ACTUAL_JOB_NAME }} -o name); do
               pod_name=$(echo $pod | cut -d'/' -f2)
               kubectl logs $pod_name > pod-logs/$pod_name.log
             done
@@ -214,7 +220,7 @@ jobs:
         if: always()
         run: |
           echo "Cleaning up..."
-          kubectl delete pytorchjob ${{ env.JOB_NAME }} || true
+          kubectl delete pytorchjob ${{ env.ACTUAL_JOB_NAME }} || true
           rm -rf pod-logs
           echo "Cleaned up successfully!"
           
