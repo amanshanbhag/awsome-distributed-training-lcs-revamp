@@ -171,7 +171,7 @@ jobs:
           done
           
           echo "PyTorch Job Name: $(kubectl get pytorchjob)"
-          echo "Job Pods: "kubectl get pods
+          echo "Job Pods: $(kubectl get pods)"
 
       - name: Monitor training run 
         id: monitor_job
@@ -246,7 +246,6 @@ jobs:
                 kubectl logs $master_pod --tail=20
                 echo "=== End of recent logs ==="
                 last_log_time=$current_time
-              fi
             elif [ $total_pods -lt $expected_pods ]; then
               echo "Warning: Only $total_pods pods found, expected $expected_pods"
             elif [ $running_pods -lt $total_pods ]; then
