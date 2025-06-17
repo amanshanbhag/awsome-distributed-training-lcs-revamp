@@ -129,7 +129,6 @@ jobs:
           echo "Job name: $JOB_NAME"
           echo "Actual job name: $ACTUAL_JOB_NAME"
 
-          echo "Waiting for pods to start..."
           expected_pods=${{ env.NUM_NODES }}
 
           start_wait=$(date +%s)
@@ -146,8 +145,6 @@ jobs:
               kubectl get pods -l app=${ACTUAL_JOB_NAME}
               exit 1
             fi
-
-            echo "Current pods: $(kubectl get pods -l app=$ACTUAL_JOB_NAME)"
             
             # Count running and ready pods
             running_pods=$(kubectl get pods -l app=${ACTUAL_JOB_NAME} -o jsonpath='{.items[?(@.status.phase=="Running")].metadata.name}' | wc -w)
