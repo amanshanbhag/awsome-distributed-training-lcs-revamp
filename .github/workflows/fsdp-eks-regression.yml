@@ -5,7 +5,7 @@ on:
     paths:
       - '3.test_cases/pytorch/FSDP/**'
 
-workflow_dispatch:
+  workflow_dispatch:
 
 jobs:
   regression:
