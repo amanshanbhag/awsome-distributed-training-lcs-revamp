@@ -1,0 +1,395 @@
+name: SageMaker HyperPod Cluster LifecycleScripts CI/CD. This CI tests for a Slurm cluster with 4 x ml.c5.4xlarge + 1 x ml.c5.4xlarge.
+
+# To change the test, change the check-quota job's WORKER_GROUPS definition (and limits, egs training plan etc), and the test-cluster-creation job's ci-lcs-test config definition. 
+
+on:
+  push:
+    branches: [ "main" ]
+    paths: 
+      - '1.architectures/5.sagemaker-hyperpod/LifecycleScripts/**'
+  pull_request:
+    paths:
+      - '1.architectures/5.sagemaker-hyperpod/LifecycleScripts/**'
+    
+  workflow_dispatch:
+
+env:
+  AWS_ACCOUNT_ID: ${{ secrets.AWS_ACCOUNT_ID }}
+  AWS_REGION: "us-east-2"
+  CONTROLLER_TYPE: "ml.m5.12xlarge"
+  WORKER_GROUPS: "ml.c5.4xlarge,3;ml.c5.48xlarge,1"
+
+
+jobs:
+  check-quota:
+    runs-on: self-hosted
+    outputs:
+      can_proceed: ${{ steps.check-quota.outputs.can_proceed }}
+    
+    steps:
+      - name: Check service quota
+        id: check-quota
+        shell: bash
+        run: |
+          AWS_REGION=${{ env.AWS_REGION }}
+          AWS_ACCOUNT_ID=${{ env.AWS_ACCOUNT_ID }}
+
+          # Define the cluster configuration for test configuration 
+          CONTROLLER_TYPE=${{ env.CONTROLLER_TYPE }}
+          CONTROLLER_COUNT=1
+
+          # Define worker groups - can be extended with more types in the future
+          WORKER_GROUPS=${{ env.WORKER_GROUPS }}
+
+          # Parse worker groups from env var
+          declare -a WORKER_TYPES=()
+          declare -a WORKER_COUNTS=()
+
+          IFS=';' read -ra GROUP_ARRAY <<< "$WORKER_GROUPS"
+          for GROUP in "${GROUP_ARRAY[@]}"; do
+            IFS=',' read -r TYPE COUNT <<< "$GROUP"
+            WORKER_TYPES+=("$TYPE")
+            WORKER_COUNTS+=("$COUNT")
+          done
+
+          echo "Checking quotas for cluster with:"
+          echo "- Controller: $CONTROLLER_COUNT x $CONTROLLER_TYPE"
+          
+          # Calculate total instances and print worker groups
+          TOTAL_INSTANCES=$CONTROLLER_COUNT
+          for i in "${!WORKER_TYPES[@]}"; do
+            echo "- Worker Instance Count $((i+1)): ${WORKER_COUNTS[$i]} x ${WORKER_TYPES[$i]}"
+            TOTAL_INSTANCES=$((TOTAL_INSTANCES + WORKER_COUNTS[$i]))
+          done
+          
+          echo "Total instances required: $TOTAL_INSTANCES"
+
+          # Quota 1: Maximum number instances allowed per SageMaker HyperPod cluster (no need to check existing clusters)
+          QUOTA_CODE="L-2CE978FC"
+          MAX_INSTANCES_PER_CLUSTER=$(aws service-quotas get-service-quota \
+            --service-code sagemaker \
+            --quota-code $QUOTA_CODE \
+            --region $AWS_REGION \
+            --query 'Quota.Value' \
+            --output text 2>/dev/null || echo "20")
+          
+          # Convert floating point to integer
+          MAX_INSTANCES_PER_CLUSTER=$(printf "%.0f" "$MAX_INSTANCES_PER_CLUSTER")
+
+          echo "Maximum instances per cluster: $MAX_INSTANCES_PER_CLUSTER"
+          if (( TOTAL_INSTANCES > MAX_INSTANCES_PER_CLUSTER )); then
+            echo "::error::Quota exceeded: Maximum instances per cluster is $MAX_INSTANCES_PER_CLUSTER, but we need $TOTAL_INSTANCES"
+            echo "can_proceed=false" >> $GITHUB_OUTPUT
+            exit 0
+          fi
+
+          # Get current usage from SageMaker API
+          CLUSTERS_JSON=$(aws sagemaker list-clusters --region $AWS_REGION --output json)
+          CURRENT_CLUSTERS=$(echo "$CLUSTERS_JSON" | jq '.ClusterSummaries | length')
+          echo "Current number of clusters: $CURRENT_CLUSTERS"
+
+          # Initialize counters for current usage
+          CURRENT_TOTAL_INSTANCES=0
+
+          # Create a map of instance type to count for aggregating by type
+          declare -A TYPE_TO_COUNT
+          TYPE_TO_COUNT["$CONTROLLER_TYPE"]=$CONTROLLER_COUNT
+
+          for i in "${!WORKER_TYPES[@]}"; do
+            TYPE="${WORKER_TYPES[$i]}"
+            COUNT="${WORKER_COUNTS[$i]}"
+
+            # Add to type map, handling multiple groups with same type
+            if [[ -z "${TYPE_TO_COUNT[$TYPE]}" ]]; then
+              TYPE_TO_COUNT["$TYPE"]=$COUNT
+            else
+              TYPE_TO_COUNT["$TYPE"]=$((TYPE_TO_COUNT["$TYPE"] + COUNT))
+            fi
+          done
+
+          # Initialize current usage map
+          declare -A CURRENT_USAGE
+          for TYPE in "${!TYPE_TO_COUNT[@]}"; do
+            CURRENT_USAGE["$TYPE"]=0
+          done
+
+          # If there are existing clusters, get their details
+          if [[ $CURRENT_CLUSTERS -gt 0 ]]; then
+            for CLUSTER_NAME in $(echo "$CLUSTERS_JSON" | jq -r '.ClusterSummaries[].ClusterName'); do
+              CLUSTER_DETAILS=$(aws sagemaker describe-cluster --cluster-name "$CLUSTER_NAME" --region $AWS_REGION --output json)
+
+              if [[ -n "$CLUSTER_DETAILS" ]]; then
+                # Quota 2: Count total instances
+                CLUSTER_INSTANCES=$(echo "$CLUSTER_DETAILS" | jq '[.InstanceGroups[].CurrentCount] | add // 0')
+                CURRENT_TOTAL_INSTANCES=$((CURRENT_TOTAL_INSTANCES + CLUSTER_INSTANCES))
+
+                # Quota 3: Count instances by type
+                for TYPE in "${!TYPE_TO_COUNT[@]}"; do
+                  TYPE_COUNT=$(echo "$CLUSTER_DETAILS" | jq --arg type "$TYPE" '[.InstanceGroups[] | select(.InstanceType==$type) | .CurrentCount] | add // 0')
+                  CURRENT_USAGE["$TYPE"]=$((CURRENT_USAGE["$TYPE"] + TYPE_COUNT))
+                done
+              fi
+            done
+          fi
+
+          echo "Current usage:"
+          echo "- Total instances: $CURRENT_TOTAL_INSTANCES"
+
+          for TYPE in "${!TYPE_TO_COUNT[@]}"; do
+            echo "- $TYPE: ${CURRENT_USAGE["$TYPE"]}"
+          done
+          
+          # Quota 2: Total number of instances allowed across SageMaker HyperPod clusters
+          QUOTA_CODE="L-3308CCC7"
+          MAX_TOTAL_INSTANCES=$(aws service-quotas get-service-quota \
+            --service-code sagemaker \
+            --quota-code $QUOTA_CODE \
+            --region $AWS_REGION \
+            --query 'Quota.Value' \
+            --output text 2>/dev/null || echo "0")
+
+          # Convert floating point to integer
+          MAX_TOTAL_INSTANCES=$(printf "%.0f" "$MAX_TOTAL_INSTANCES")
+
+          echo "Maximum total instances across all clusters: $MAX_TOTAL_INSTANCES"
+          if (( CURRENT_TOTAL_INSTANCES + TOTAL_INSTANCES > MAX_TOTAL_INSTANCES )); then
+            echo "::error::Quota exceeded: Maximum total instances is $MAX_TOTAL_INSTANCES, current usage is $CURRENT_TOTAL_INSTANCES, and we need $TOTAL_INSTANCES more"
+            echo "can_proceed=false" >> $GITHUB_OUTPUT
+            exit 0
+          fi
+
+          # Quota 3: <Instance type> for cluster usage
+          for TYPE in "${!TYPE_TO_COUNT[@]}"; do
+            COUNT="${TYPE_TO_COUNT[$TYPE]}"
+            CURRENT="${CURRENT_USAGE[$TYPE]}"
+
+            # Get quota code based on instance type
+            QUOTA_CODE=""
+            case "$TYPE" in
+              "ml.m5.12xlarge") QUOTA_CODE="L-E2A0AC0F" ;;
+              "ml.c5.4xlarge") QUOTA_CODE="L-3A6AD204" ;;
+              "ml.p5.48xlarge") QUOTA_CODE="L-8762A75F" ;;
+              "ml.g5.8xlarge") QUOTA_CODE="L-1619F5B7" ;;
+              "ml.g5.12xlarge") QUOTA_CODE="L-24E5A1B2" ;;
+              "ml.g5.48xlarge") QUOTA_CODE="L-D7D95295" ;;
+              *) echo "Warning: No known quota code for $TYPE, skipping specific check" ;;
+            esac
+
+            if [[ -n "$QUOTA_CODE" ]]; then
+              MAX_INSTANCES=$(aws service-quotas get-service-quota \
+                --service-code sagemaker \
+                --quota-code $QUOTA_CODE \
+                --region $AWS_REGION \
+                --query 'Quota.Value' \
+                --output text 2>/dev/null || echo "0")
+
+              # Convert floating point to integer
+              MAX_INSTANCES=$(printf "%.0f" "$MAX_INSTANCES")
+
+              echo "Maximum $TYPE instances: $MAX_INSTANCES"
+              echo "Current $TYPE usage: $CURRENT"
+
+              if (( CURRENT + COUNT > MAX_INSTANCES )); then
+                echo "::error::Quota exceeded: Maximum $TYPE instances is $MAX_INSTANCES, current usage is $CURRENT, and we need $COUNT more"
+                echo "can_proceed=false" >> $GITHUB_OUTPUT
+                exit 0
+              fi
+            fi
+          done
+
+          # Quota 4: Maximum size of EBS volume in GB for a SageMaker HyperPod cluster instance (no need to check existing clusters)
+          QUOTA_CODE="L-E13DF72A"
+          MAX_EBS_SIZE=$(aws service-quotas get-service-quota \
+            --service-code sagemaker \
+            --quota-code $QUOTA_CODE \
+            --region $AWS_REGION \
+            --query 'Quota.Value' \
+            --output text 2>/dev/null || echo "0")
+
+          # Convert floating point to integer
+          MAX_EBS_SIZE=$(printf "%.0f" "$MAX_EBS_SIZE")
+          
+          echo "Maximum EBS volume size: $MAX_EBS_SIZE GB"
+
+          if (( 500 > MAX_EBS_SIZE )); then  # We're using 500GB volumes
+            echo "::error::Quota exceeded: Maximum EBS volume size is $MAX_EBS_SIZE GB, but we need 500 GB"
+            echo "can_proceed=false" >> $GITHUB_OUTPUT
+            exit 0
+          fi
+          
+          # All checks passed
+          echo "All quota checks passed!"
+          echo "can_proceed=true" >> $GITHUB_OUTPUT
+
+  test-cluster-creation:
+    needs: check-quota
+    if: ${{ needs.check-quota.outputs.can_proceed == 'true' }}
+    runs-on: self-hosted
+    timeout-minutes: 40
+    concurrency:
+      group: ${{ github.workflow }}-lcs-test
+      cancel-in-progress: false
+    
+    steps:
+      - name: Checkout repository
+        uses: actions/checkout@v4
+        
+      - name: Set up environment
+        run: |
+          echo "Setting up environment..."
+          sudo apt-get update
+          sudo apt-get install -y jq curl unzip
+          pip install boto3 jsonschema
+          mkdir -p artifacts
+          
+      - name: Create config file
+        run: |
+          # Create a unique cluster name using the run ID
+          CLUSTER_NAME="ci-lcs-test-${{ github.run_id }}"
+          echo "CLUSTER_NAME=$CLUSTER_NAME" >> $GITHUB_ENV
+
+          # Parse instance groups from env var
+          CONTROLLER_TYPE="${{ env.CONTROLLER_TYPE }}"
+          WORKER_GROUPS="${{ env.WORKER_GROUPS }}"
+
+          # Parse worker groups
+          declare -a WORKER_TYPES=()
+          declare -a WORKER_COUNTS=()
+
+          IFS=';' read -ra GROUP_ARRAY <<< "$WORKER_GROUPS"
+          for GROUP in "${GROUP_ARRAY[@]}"; do
+            IFS=',' read -r TYPE COUNT <<< "$GROUP"
+            WORKER_TYPES+=("$TYPE")
+            WORKER_COUNTS+=("$COUNT")
+          done
+
+          # Create worker groups JSON
+          WORKER_GROUPS_JSON="["
+          for i in "${!WORKER_TYPES[@]}"; do
+            if [[ $i -gt 0 ]]; then
+              WORKER_GROUPS_JSON+=","
+            fi
+            WORKER_GROUPS_JSON+="
+              {
+                \"instance_type\": \"${WORKER_TYPES[$i]}\",
+                \"instance_count\": ${WORKER_COUNTS[$i]},
+                \"volume_size_gb\": 500,
+                \"threads_per_core\": 1,
+                \"use_training_plan\": \"no\"
+              }"
+          done
+          WORKER_GROUPS_JSON+="]"
+          
+          # Create config file with controller and worker nodes. TODO: Change deployed_observability. 
+          # Don't change the following:
+          # - AUTO_MODE: this flag is required for CI automation. 
+          # - aws_region: This is where the CF stack is configured. 
+          # - stack_id_vpc: Pre-deployed CF stack to test CI. 
+          AWS_REGION=${{ env.AWS_REGION }}
+          cat > artifacts/ci-config-${{ github.run_id }}.json << EOF
+          {
+            "AUTO_MODE": "true",
+            "aws_region": "${AWS_REGION}",
+            "remove_and_clone": "yes",
+            "stack_id_vpc": "sagemaker-hyperpod-lcs-cicd",
+            "multi_headnode": "no",
+            "using_neuron": "no",
+            "deployed_observability": "no",
+            "controller_name": "controller-machine",
+            "controller_type": "$CONTROLLER_TYPE",
+            "add_login_group": "no",
+            "worker_groups": $WORKER_GROUPS_JSON,
+            "cluster_name": "$CLUSTER_NAME",
+            "configure_users": "no",
+            "create_cluster": "yes"
+          }
+          EOF
+          
+          echo "Config file created successfully with:"
+          echo "- Controller: $CONTROLLER_TYPE"
+          for i in "${!WORKER_TYPES[@]}"; do
+            echo "- Worker Group $((i+1)): ${WORKER_COUNTS[$i]} x ${WORKER_TYPES[$i]}"
+          done
+
+      - name: Run cluster creation script
+        id: create_cluster
+        run: |
+          echo "Running cluster creation script..."
+          
+          # Run the script with the config file
+          ./1.architectures/5.sagemaker-hyperpod/automate-smhp-slurm/automate-cluster-creation.sh -c artifacts/ci-config-${{ github.run_id }}.json 2>&1 | tee artifacts/cluster-${{ env.CLUSTER_NAME }}-creation-log.txt
+
+          # Copy generated files to artifacts directory
+          if [ -f "cluster-config.json" ]; then
+            cp cluster-config.json artifacts/
+          fi
+          
+          if [ -f "provisioning_parameters.json" ]; then
+            cp provisioning_parameters.json artifacts/
+          fi
+          
+          if [ -f "env_vars" ]; then
+            cp env_vars artifacts/
+          fi
+          
+          echo "Cluster creation script completed"
+          
+      - name: Wait for cluster to be in service
+        run: |
+          echo "Waiting for cluster to be in service..."
+          CLUSTER_NAME="${{ env.CLUSTER_NAME }}"
+          MAX_ATTEMPTS=40
+          ATTEMPT=0
+          
+          while [ $ATTEMPT -lt $MAX_ATTEMPTS ]; do
+            # Get cluster details
+            aws sagemaker describe-cluster --cluster-name "$CLUSTER_NAME" --output json > artifacts/cluster-details-${{ env.CLUSTER_NAME }}.json
+
+            STATUS=$(cat artifacts/cluster-details-${{ env.CLUSTER_NAME }}.json | jq -r '.ClusterStatus')
+            echo "Current status: $STATUS"
+
+            INSTANCE_GROUPS=$(cat artifacts/cluster-details-${{ env.CLUSTER_NAME }}.json | jq -r '.InstanceGroups[].InstanceGroupName')
+            for GROUP in $INSTANCE_GROUPS; do
+              IG_STATUS=$(cat artifacts/cluster-details-${{ env.CLUSTER_NAME }}.json | jq -r '.InstanceGroups[] | select(.InstanceGroupName == \"$GROUP\").Status')
+              echo "Instance group $GROUP status: $IG_STATUS"
+            done
+            
+            if [ "$STATUS" = "InService" ]; then
+              echo "Cluster is now in service!"
+              break
+            elif [ "$STATUS" = "Failed" ]; then
+              echo "::error::Cluster creation failed"
+              FAILURE_REASON=$(aws sagemaker describe-cluster --cluster-name "$CLUSTER_NAME" --query 'FailureReason' --output text)
+              echo "::error::Failure reason: $FAILURE_REASON"
+              exit 1
+            fi
+            
+            ATTEMPT=$((ATTEMPT+1))
+            echo "Waiting for cluster to be InService (attempt $ATTEMPT/$MAX_ATTEMPTS)..."
+            sleep 60
+          done
+          
+          if [ $ATTEMPT -eq $MAX_ATTEMPTS ]; then
+            echo "::error::Timed out waiting for cluster to be in service"
+            exit 1
+          fi
+      
+      - name: Upload artifacts
+        if: always()
+        uses: actions/upload-artifact@v4
+        with:
+          name: cluster-artifacts-${{ github.run_id }}
+          path: artifacts/
+          retention-days: 7
+                    
+      - name: Cleanup (delete cluster and resources)
+        if: always()
+        run: |
+          # Remove config file and cluster details file
+          rm -rf artifacts/
+          
+          CLUSTER_NAME="${{ env.CLUSTER_NAME }}"
+          echo "Deleting cluster: $CLUSTER_NAME"
+          
+          aws sagemaker delete-cluster --cluster-name "$CLUSTER_NAME"
+          echo "Cluster deletion initiated"
