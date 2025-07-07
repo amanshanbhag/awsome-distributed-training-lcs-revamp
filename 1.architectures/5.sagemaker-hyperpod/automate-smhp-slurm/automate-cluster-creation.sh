@@ -6,6 +6,16 @@
 # Exit immediately if a command exits with a non-zero status. Print commands and their arguments as executed
 set -e
 
+# Parse command line arguments
+CONFIG_FILE=""
+while [[ "$#" -gt 0 ]]; do
+    case $1 in
+        -c|--config) CONFIG_FILE="$(realpath "$2")"; shift ;;
+        *) echo "Unknown parameter passed: $1"; exit 1 ;;
+    esac
+    shift
+done
+
 #===Global===
 export AWS_ACCOUNT_ID=$(aws sts get-caller-identity --query "Account" --output text)
 export AWS_REGION=${AWS_DEFAULT_REGION:-$(aws configure get region)}
@@ -17,6 +27,50 @@ GREEN='\033[0;32m'
 BLUE='\033[0;34m'
 YELLOW='\033[1;33m'
 NC='\033[0m' # No Color
+
+# Helper function to get user inputs with default values specified
+get_input() {
+    local prompt="$1"
+    local default="$2"
+    local key="$3"  # Optional key for config file lookups
+    local input
+
+    if [[ -n "$CONFIG_FILE" && -n "$key" && -f "$CONFIG_FILE" ]]; then
+        # Try to get value from config file via jq
+        if command -v jq &> /dev/null; then
+            value=$(jq -r ".$key // \"\"" "$CONFIG_FILE" 2>/dev/null)
+            if [[ -n "$value" && "$value" != "null" ]]; then
+                echo -e "${GREEN}Using value from config file for $key: $value${NC}" >&2
+                echo "$value"
+                return
+            fi
+        fi
+    fi
+
+    # Fall back to interactive mode
+    read -e -p "$prompt [Default: $default]: " input
+    echo "${input:-$default}"    
+}
+
+# CICD: Helper function for simple ENTER prompts
+read_or_skip() {
+    local prompt="$1"
+    
+    # Check if we're in AUTO_MODE
+    if [[ -n "$CONFIG_FILE" && -f "$CONFIG_FILE" ]]; then
+        if command -v jq &> /dev/null; then
+            auto_mode=$(jq -r ".AUTO_MODE // \"false\"" "$CONFIG_FILE" 2>/dev/null)
+            if [[ "$auto_mode" == "true" ]]; then
+                # Skip the prompt in AUTO_MODE
+                return
+            fi
+        fi
+    fi
+    
+    # Fall back to interactive mode
+    read -e -p "$prompt"
+}
+
 
 # Function to print a yellow header
 print_header() {
@@ -108,8 +162,7 @@ clone_adt() {
     REPO_NAME="awsome-distributed-training"
     if [ -d "$REPO_NAME" ]; then
         echo -e "${YELLOW}⚠️  The directory '$REPO_NAME' already exists.${NC}"
-        echo -e "${GREEN}Do you want to remove it and clone again? (yes/no): ${NC}"
-        read -e REMOVE_AND_CLONE
+        REMOVE_AND_CLONE=$(get_input "Do you want to remove it and clone again? (yes/no)" "no" "remove_and_clone")
         if [[ $REMOVE_AND_CLONE == "yes" ]]; then
             echo -e "${YELLOW}Removing existing directory...${NC}"
             rm -rf "$REPO_NAME"
@@ -131,27 +184,26 @@ clone_adt() {
 multi_headnode() {
     source env_vars
     echo -e "${BLUE}=== Multi-Headnode Feature ===${NC}"
-    MULTI_HEADNODE=$(get_input "Do you want to enable multi-headnode feature?" "no")
+    MULTI_HEADNODE=$(get_input "Do you want to enable multi-headnode feature? (yes/no)" "no" "multi_headnode")
     if [[ $MULTI_HEADNODE == "yes" ]]; then
         export MH=true
         local SHOULD_DEPLOY=true
         # Query for BackupPrivateSubnet and FSxLustreFilesystemDNSname in create_config.sh
         # DONE
 
-        export MULTI_HEAD_SLURM_STACK=$(get_input "Enter the name for the SageMaker HyperPod Multiheadnode stack to be deployed" "sagemaker-hyperpod-mh")
+        export MULTI_HEAD_SLURM_STACK=$(get_input "Enter the name for the SageMaker HyperPod Multiheadnode stack to be deployed" "sagemaker-hyperpod-mh" "multi_head_slurm_stack")
 
         # Check if stack already exists and has required outputs
-        if aws cloudformation describe-stacks --stack-name ${MULTI_HEAD_SLURM_STACK} >/dev/null 2>&1; then
+        if aws cloudformation describe-stacks --stack-name ${MULTI_HEAD_SLURM_STACK}  --region $AWS_REGION >/dev/null 2>&1; then
             echo -e "${YELLOW}⚠️  A stack with name '${MULTI_HEAD_SLURM_STACK}' already exists${NC}"
             echo -e "${YELLOW}Note: The new stack's AZs must match the existing stack's AZs for the multi-headnode feature to work properly (${SUBNET_ID}, ${BACKUP_SUBNET})${NC}"
-            echo -e "${BLUE}Would you like to deploy a stack with a different name? (yes/no)${NC}"
-            read -e DEPLOY_NEW_STACK
+            DEPLOY_NEW_STACK=$(get_input "Would you like to deploy a stack with a different name? (yes/no)" "no" "deploy_new_stack")
 
             if [[ $DEPLOY_NEW_STACK != "yes" ]]; then
                 echo -e "${YELLOW}Using existing stack '${MULTI_HEAD_SLURM_STACK}'${NC}"
                 SHOULD_DEPLOY=false
             else
-                export MULTI_HEAD_SLURM_STACK=$(get_input "Enter the NEW name for the SageMaker HyperPod Multiheadnode stack to be deployed)" "sagemaker-hyperpod-mh")
+                export MULTI_HEAD_SLURM_STACK=$(get_input "Enter the NEW name for the SageMaker HyperPod Multiheadnode stack to be deployed" "sagemaker-hyperpod-mh" "multi_head_slurm_stack")
             fi
         fi
 
@@ -160,12 +212,11 @@ multi_headnode() {
 
         if [[ $SHOULD_DEPLOY == true ]]; then
             # Ask user to input EMAIL and DB_USER_NAME
-            export EMAIL=$(get_input "Input your SNSSubEmailAddress here (this is the email address that will be used to send notifications about your head node status)" "johndoe@example.com")
-            export DB_USER_NAME=$(get_input "Input your DB_USER_NAME here (this is the username that will be used to access the SlurmDB)" "johndoe")
-            # export MULTI_HEAD_SLURM_STACK=$(get_input "Enter the name for the SageMaker HyperPod Multiheadnode stack to be deployed)" "sagemaker-hyperpod-mh")
+            export EMAIL=$(get_input "Input your SNSSubEmailAddress here (this is the email address that will be used to send notifications about your head node status)" "johndoe@example.com" "email")
+            export DB_USER_NAME=$(get_input "Input your DB_USER_NAME here (this is the username that will be used to access the SlurmDB)" "johndoe" "db_user_name")
 
             echo -e "${YELLOW}The following CloudFormation command will be executed:${NC}"
-            echo -e "${GREEN}aws cloudformation deploy \\
+            echo -e "${GREEN}aws cloudformation deploy --region $AWS_REGION \\
                 --template-file awsome-distributed-training/1.architectures/5.sagemaker-hyperpod/sagemaker-hyperpod-slurm-multi-headnode.yaml \\
                 --stack-name ${MULTI_HEAD_SLURM_STACK} \\
                 --parameter-overrides \\
@@ -181,10 +232,10 @@ multi_headnode() {
             echo -e "- IAM roles and policies for multi-head node functionality"
 
             echo -e "\n${BLUE}Would you like to proceed with the deployment? Please acnowledge that you allow CloudFormation to create resources in your account by hitting ENTER${NC}"
-            read
+            read_or_skip ""
 
             # Deploy the multi-head CF stack
-            aws cloudformation deploy \
+            aws cloudformation deploy --region $AWS_REGION \
                 --template-file awsome-distributed-training/1.architectures/5.sagemaker-hyperpod/sagemaker-hyperpod-slurm-multi-headnode.yaml \
                 --stack-name ${MULTI_HEAD_SLURM_STACK} \
                 --parameter-overrides \
@@ -198,21 +249,21 @@ multi_headnode() {
             # Wait for stack to be created
             echo -e "${BLUE}Waiting for multi-headnode stack creation to complete...${NC}"
             aws cloudformation wait stack-create-complete \
-                --stack-name ${MULTI_HEAD_SLURM_STACK}
+                --stack-name ${MULTI_HEAD_SLURM_STACK} --region $AWS_REGION
         else
             # Get the outputs for EMAIL and DB_USER_NAME (used in provisioning_parameters.json!!!)
             echo "From Stack: ${MULTI_HEAD_SLURM_STACK}"
-            export EMAIL=$(aws cloudformation describe-stacks --stack-name ${MULTI_HEAD_SLURM_STACK} --query 'Stacks[0].Outputs[?OutputKey==`SNSSubEmailAddress`].OutputValue' --output text)
-            export DB_USER_NAME=$(aws cloudformation describe-stacks --stack-name ${MULTI_HEAD_SLURM_STACK} --query 'Stacks[0].Outputs[?OutputKey==`SlurmDBUsername`].OutputValue' --output text)        
+            export EMAIL=$(aws cloudformation describe-stacks --stack-name ${MULTI_HEAD_SLURM_STACK} --query 'Stacks[0].Outputs[?OutputKey==`SNSSubEmailAddress`].OutputValue' --region $AWS_REGION --output text)
+            export DB_USER_NAME=$(aws cloudformation describe-stacks --stack-name ${MULTI_HEAD_SLURM_STACK} --query 'Stacks[0].Outputs[?OutputKey==`SlurmDBUsername`].OutputValue' --region $AWS_REGION --output text)        
 
             echo -e "Set Email: ${EMAIL}, DB Username: ${DB_USER_NAME}"
         fi        
 
         # Query new stack for SlurmDBEndpointAddress SlurmDBSecretArn SlurmExecutionRoleArn SlurmFailOverSNSTopicArn and write these to env_vars
-        SLURM_DB_ENDPOINT_ADDRESS=$(aws cloudformation describe-stacks --stack-name $MULTI_HEAD_SLURM_STACK --query 'Stacks[0].Outputs[?OutputKey==`SlurmDBEndpointAddress`].OutputValue' --output text)
-        SLURM_DB_SECRET_ARN=$(aws cloudformation describe-stacks --stack-name $MULTI_HEAD_SLURM_STACK --query 'Stacks[0].Outputs[?OutputKey==`SlurmDBSecretArn`].OutputValue' --output text)
-        SLURM_EXECUTION_ROLE_ARN=$(aws cloudformation describe-stacks --stack-name $MULTI_HEAD_SLURM_STACK --query 'Stacks[0].Outputs[?OutputKey==`SlurmExecutionRoleArn`].OutputValue' --output text)
-        SLURM_SNS_FAILOVER_TOPIC_ARN=$(aws cloudformation describe-stacks --stack-name $MULTI_HEAD_SLURM_STACK --query 'Stacks[0].Outputs[?OutputKey==`SlurmFailOverSNSTopicArn`].OutputValue' --output text)
+        SLURM_DB_ENDPOINT_ADDRESS=$(aws cloudformation describe-stacks --stack-name $MULTI_HEAD_SLURM_STACK --query 'Stacks[0].Outputs[?OutputKey==`SlurmDBEndpointAddress`].OutputValue' --region $AWS_REGION --output text)
+        SLURM_DB_SECRET_ARN=$(aws cloudformation describe-stacks --stack-name $MULTI_HEAD_SLURM_STACK --query 'Stacks[0].Outputs[?OutputKey==`SlurmDBSecretArn`].OutputValue' --region $AWS_REGION --output text)
+        SLURM_EXECUTION_ROLE_ARN=$(aws cloudformation describe-stacks --stack-name $MULTI_HEAD_SLURM_STACK --query 'Stacks[0].Outputs[?OutputKey==`SlurmExecutionRoleArn`].OutputValue' --region $AWS_REGION --output text)
+        SLURM_SNS_FAILOVER_TOPIC_ARN=$(aws cloudformation describe-stacks --stack-name $MULTI_HEAD_SLURM_STACK --query 'Stacks[0].Outputs[?OutputKey==`SlurmFailOverSNSTopicArn`].OutputValue' --region $AWS_REGION --output text)
 
         echo "export SLURM_DB_ENDPOINT_ADDRESS=${SLURM_DB_ENDPOINT_ADDRESS}" >> env_vars
         echo "export SLURM_DB_SECRET_ARN=${SLURM_DB_SECRET_ARN}" >> env_vars
@@ -269,7 +320,22 @@ multi_headnode() {
             echo -e "1. [RECOMMENDED, PLEASE READ ABOVE] Press Enter to continue with the rest of the script"
             echo -e "2. Press Ctrl+C to exit the script."
 
-            read -e -p "Select an option (Enter/Ctrl+C): " choice
+            if [[ -n "$CONFIG_FILE" && -f "$CONFIG_FILE" ]]; then
+                if command -v jq &> /dev/null; then
+                    auto_mode=$(jq -r ".AUTO_MODE // \"false\"" "$CONFIG_FILE" 2>/dev/null)
+                    if [[ "$auto_mode" == "true" ]]; then
+                        # Default to option 1 in AUTO_MODE
+                        choice=""
+                    else
+                        read -e -p "Select an option (Enter/Ctrl+C): " choice
+                    fi
+                else
+                    read -e -p "Select an option (Enter/Ctrl+C): " choice
+                fi
+            else
+                read -e -p "Select an option (Enter/Ctrl+C): " choice
+            fi
+
 
             if [[ -z "$choice" ]]; then
                 echo -e "${BLUE}Continuing with the rest of the script...${NC}"
@@ -289,12 +355,10 @@ setup_env_vars() {
     echo -e "${BLUE}=== Setting Up Environment Variables ===${NC}"
     echo -e "${GREEN}Cloning awsome-distributed-training${NC}"
     clone_adt
+    
+    export STACK_ID_VPC=$(get_input "Enter the name of the SageMaker VPC CloudFormation stack that was deployed as a prerequisite" "sagemaker-hyperpod" "stack_id_vpc")
 
-    echo -e "${BLUE}Enter the name of the SageMaker VPC CloudFormation stack that was deployed as a prerequisite (default: sagemaker-hyperpod):${NC}"
-    read -e STACK_ID_VPC
-    export STACK_ID_VPC=${STACK_ID_VPC:-sagemaker-hyperpod}
-
-    if [ "$CF_STACK_NAME" != "sagemaker-hyperpod" ]; then
+    if [ "$STACK_ID_VPC" != "sagemaker-hyperpod" ]; then
         echo -e "${GREEN}✅ Configuration script updated with stack name: $STACK_ID_VPC${NC}"
     else
         echo -e "${GREEN}Using default stack name: sagemaker-hyperpod${NC}"
@@ -320,7 +384,21 @@ setup_env_vars() {
         echo -e "1. Press Enter to continue with the rest of the script (Not Recommended, unless you know how to set the environment variables manually!)"
         echo -e "2. Press Ctrl+C to exit the script."
 
-        read -e -p "Select an option (Enter/Ctrl+C): " choice
+        if [[ -n "$CONFIG_FILE" && -f "$CONFIG_FILE" ]]; then
+            if command -v jq &> /dev/null; then
+                auto_mode=$(jq -r ".AUTO_MODE // \"false\"" "$CONFIG_FILE" 2>/dev/null)
+                if [[ "$auto_mode" == "true" ]]; then
+                    # Default to option 1 in AUTO_MODE
+                    choice=""
+                else
+                    read -e -p "Select an option (Enter/Ctrl+C): " choice
+                fi
+            else
+                read -e -p "Select an option (Enter/Ctrl+C): " choice
+            fi
+        else
+            read -e -p "Select an option (Enter/Ctrl+C): " choice
+        fi
 
         if [[ -z "$choice" ]]; then
             echo -e "${BLUE}Continuing with the rest of the script...${NC}"
@@ -347,10 +425,9 @@ setup_lifecycle_scripts() {
 
     cd awsome-distributed-training/1.architectures/5.sagemaker-hyperpod/LifecycleScripts/
 
-    echo -e "${YELLOW}Are you using Neuron-based instances (Trainium/Inferentia)? (yes/no)${NC}"
-    read -e USING_NEURON
+    USING_NEURON=$(get_input "Are you using Neuron-based instances (Trainium/Inferentia)? (yes/no)" "no" "using_neuron")
 
-    if [ "$USING_NEURON" == "yes" ]; then
+    if [[ "$USING_NEURON" == "yes" ]]; then
         echo -e "${BLUE}Enabling Neuron in LCS...${NC}"
         sed -i.bak 's/enable_update_neuron_sdk = False/enable_update_neuron_sdk = True/' base-config/config.py
         rm base-config/config.py.bak
@@ -366,7 +443,7 @@ setup_lifecycle_scripts() {
 
     FSX_OPENZFS_DNS=$(aws cloudformation describe-stacks \
         --stack-name "${STACK_ID_VPC}" \
-        --query 'Stacks[0].Outputs[?OutputKey==`FSxOpenZFSFileSystemDNSname`].OutputValue' \
+        --query 'Stacks[0].Outputs[?OutputKey==`FSxOpenZFSFileSystemDNSname`].OutputValue' --region $AWS_REGION \
         --output text)
     
     if [ -n "$FSX_OPENZFS_DNS" ]; then
@@ -376,7 +453,7 @@ setup_lifecycle_scripts() {
         # Get the FSx OpenZFS File System ID as well
         FSX_OPENZFS_ID=$(aws cloudformation describe-stacks \
             --stack-name "${STACK_ID_VPC}" \
-            --query 'Stacks[0].Outputs[?OutputKey==`FSxOpenZFSFileSystemId`].OutputValue' \
+            --query 'Stacks[0].Outputs[?OutputKey==`FSxOpenZFSFileSystemId`].OutputValue' --region $AWS_REGION \
             --output text)
         
         ENABLE_FSX_OPENZFS="true"
@@ -392,10 +469,9 @@ setup_lifecycle_scripts() {
         echo -e "${BLUE}No FSx OpenZFS detected in stack. Continuing with FSx OpenZFS disabled in LCS...${NC}"
     fi
 
-    echo -e "${YELLOW}Did you deploy the optional hyperpod-observability CloudFormation stack? (yes/no)${NC}"
-    read -e DEPLOYED_OBSERVABILITY
+    DEPLOYED_OBSERVABILITY=$(get_input "Did you deploy the optional hyperpod-observability CloudFormation stack? (yes/no)" "yes" "deployed_observability")
 
-    if [ "$DEPLOYED_OBSERVABILITY" == "yes" ]; then
+    if [[ "$DEPLOYED_OBSERVABILITY" == "yes" ]]; then
         echo -e "${BLUE}Enabling observability in LCS...${NC}"
         sed -i.bak 's/enable_observability = False/enable_observability = True/' base-config/config.py
         rm base-config/config.py.bak
@@ -473,7 +549,21 @@ setup_lifecycle_scripts() {
         echo -e "1. Press Enter to continue with the rest of the script (Not Recommended, unless you know how to set the environment variables manually!)"
         echo -e "2. Press Ctrl+C to exit the script."
 
-        read -e -p "Select an option (Enter/Ctrl+C): " choice
+        if [[ -n "$CONFIG_FILE" && -f "$CONFIG_FILE" ]]; then
+            if command -v jq &> /dev/null; then
+                auto_mode=$(jq -r ".AUTO_MODE // \"false\"" "$CONFIG_FILE" 2>/dev/null)
+                if [[ "$auto_mode" == "true" ]]; then
+                    # Default to option 1 in AUTO_MODE
+                    choice=""
+                else
+                    read -e -p "Select an option (Enter/Ctrl+C): " choice
+                fi
+            else
+                read -e -p "Select an option (Enter/Ctrl+C): " choice
+            fi
+        else
+            read -e -p "Select an option (Enter/Ctrl+C): " choice
+        fi
 
         if [[ -z "$choice" ]]; then
             echo -e "${BLUE}Continuing with the rest of the script...${NC}"
@@ -488,32 +578,22 @@ setup_lifecycle_scripts() {
     echo -e "\n${BLUE}=== Lifecycle Scripts Setup Complete ===${NC}"
 }
 
-# Helper function to get user inputs with default values specified
-get_input() {
-    local prompt="$1"
-    local default="$2"
-    local input
-    read -e -p "$prompt [$default]: " input
-    echo "${input:-$default}"    
-}
-
 # Function to write the cluster-config.json file
 create_config() {
-    echo -e "\n${BLUE}=== Lifecycle Scripts Setup Complete ===${NC}"
+    echo -e "\n${BLUE}=== Cluster Configuration ===${NC}"
 
     # Get controller machine details
-    CONTROLLER_NAME=$(get_input "Enter the name for the controller instance group" "controller-machine")
-    CONTROLLER_TYPE=$(get_input "Enter the instance type for the controller" "ml.m5.12xlarge")
+    CONTROLLER_NAME=$(get_input "Enter the name for the controller instance group" "controller-machine" "controller_name")
+    CONTROLLER_TYPE=$(get_input "Enter the instance type for the controller" "ml.m5.4xlarge" "controller_type")
 
     # Initialize instance groups array
     INSTANCE_GROUPS="["
 
     # Add login group
-    echo -e "${GREEN}Do you want to add a login group? (yes/no): ${NC}"
-    read -e ADD_LOGIN_GROUP
+    ADD_LOGIN_GROUP=$(get_input "Do you want to add a login group? (yes/no)" "no" "add_login_group")
 
     if [[ $ADD_LOGIN_GROUP == "yes" ]]; then
-        LOGIN_TYPE=$(get_input "Enter the instance type for the login group" "ml.m5.4xlarge")
+        LOGIN_TYPE=$(get_input "Enter the instance type for the login group" "ml.m5.4xlarge" "login_type")
 
         INSTANCE_GROUPS+="{
             \"InstanceGroupName\": \"login-group\",
@@ -563,25 +643,101 @@ create_config() {
     # Loop to add worker instance groups
     WORKER_GROUP_COUNT=1
     echo -e "\n${BLUE}=== Worker Group Configuration ===${NC}"
-    while true; do
-        if [[ $WORKER_GROUP_COUNT -eq 1 ]]; then
-            ADD_WORKER=$(get_input "Do you want to add a worker instance group? (yes/no):" "yes")
-        else
-            ADD_WORKER=$(get_input "Do you want to add another worker instance group? (yes/no):" "no")
+    
+    # Check if worker_groups defined in config
+    AUTO_WORKER_GROUPS=false
+    if [[ -n "$CONFIG_FILE" && -f "$CONFIG_FILE" ]]; then
+        if command -v jq &> /dev/null; then
+            # Try to get worker_groups array from config regardless of AUTO_MODE
+            worker_groups_json=$(jq -r ".worker_groups // \"[]\"" "$CONFIG_FILE" 2>/dev/null)
+            if [[ "$worker_groups_json" != "[]" && "$worker_groups_json" != "null" ]]; then
+                AUTO_WORKER_GROUPS=true
+                worker_group_count=$(echo "$worker_groups_json" | jq '. | length')
+                
+                echo -e "${GREEN}Using worker groups configuration from config file (${worker_group_count} groups)${NC}"
+                
+                for ((i=0; i<worker_group_count; i++)); do
+                    WORKER_GROUP_COUNT=$((i+1))
+                    echo -e "${YELLOW}Configuring Worker Group $WORKER_GROUP_COUNT from config${NC}"
+                    
+                    # Extract values for this worker group
+                    INSTANCE_TYPE=$(echo "$worker_groups_json" | jq -r ".[$i].instance_type")
+                    INSTANCE_COUNT=$(echo "$worker_groups_json" | jq -r ".[$i].instance_count")
+                    USE_TRAINING_PLAN=$(echo "$worker_groups_json" | jq -r ".[$i].use_training_plan // \"no\"")
+                    VOLUME_SIZE=$(echo "$worker_groups_json" | jq -r ".[$i].volume_size_gb // \"500\"")
+                    THREADS_PER_CORE=$(echo "$worker_groups_json" | jq -r ".[$i].threads_per_core // \"1\"")
+                    
+                    INSTANCE_GROUPS+=",
+            {
+                \"InstanceGroupName\": \"worker-group-$WORKER_GROUP_COUNT\",
+                \"InstanceType\": \"$INSTANCE_TYPE\",
+                \"InstanceCount\": $INSTANCE_COUNT,
+                \"InstanceStorageConfigs\": [
+                    {
+                        \"EbsVolumeConfig\": {
+                            \"VolumeSizeInGB\": $VOLUME_SIZE
+                        }
+                    }
+                ],
+                \"LifeCycleConfig\": {
+                    \"SourceS3Uri\": \"s3://${BUCKET}/src\",
+                    \"OnCreate\": \"on_create.sh\"
+                },
+                \"ExecutionRole\": \"${ROLE}\",
+                \"ThreadsPerCore\": $THREADS_PER_CORE"
+                    
+                    # Add training plan if specified
+                    if [[ "$USE_TRAINING_PLAN" == "yes" ]]; then
+                        TRAINING_PLAN=$(echo "$worker_groups_json" | jq -r ".[$i].training_plan // \"\"")
+                        if [[ -n "$TRAINING_PLAN" && "$TRAINING_PLAN" != "null" ]]; then
+                            echo -e "${YELLOW}Configuring training plan: $TRAINING_PLAN${NC}"
+                            
+                            # Get training plan details
+                            if TRAINING_PLAN_DESCRIPTION=$(aws sagemaker describe-training-plan --training-plan-name "$TRAINING_PLAN" --output json --region $AWS_REGION 2>/dev/null); then
+                                TRAINING_PLAN_ARN=$(echo "$TRAINING_PLAN_DESCRIPTION" | jq -r '.TrainingPlanArn')
+                                echo -e "${GREEN}Training plan ARN: $TRAINING_PLAN_ARN${NC}"
+                                
+                                INSTANCE_GROUPS+=",
+                \"TrainingPlanArn\": \"$TRAINING_PLAN_ARN\""
+                            else
+                                echo -e "${YELLOW}Warning: Training plan '$TRAINING_PLAN' not found, skipping training plan configuration${NC}"
+                            fi
+                        fi
+                    fi
+                    
+                    INSTANCE_GROUPS+="
+            }"
+                    echo -e "${GREEN}✅ Worker Group $WORKER_GROUP_COUNT added${NC}"
+                done
+                
+                # Increment WORKER_GROUP_COUNT to account for all worker groups
+                WORKER_GROUP_COUNT=$((worker_group_count + 1))
+            fi
         fi
+    fi
 
-        if [[ $ADD_WORKER != "yes" ]]; then
-            break
-        fi
+    # Fall back to interactive mode if not handled by config
+    if [[ "$AUTO_WORKER_GROUPS" != "true" ]]; then
+        while true; do
+            if [[ $WORKER_GROUP_COUNT -eq 1 ]]; then
+                ADD_WORKER=$(get_input "Do you want to add a worker instance group? (yes/no):" "yes" "add_worker")
+            else
+                ADD_WORKER=$(get_input "Do you want to add another worker instance group? (yes/no):" "no" "add_worker")
+            fi
 
-        echo -e "${YELLOW}Configuring Worker Group $WORKER_GROUP_COUNT${NC}"
-        INSTANCE_TYPE=$(get_input "Enter the instance type for worker group $WORKER_GROUP_COUNT" "ml.c5.4xlarge")
-        INSTANCE_COUNT=$(get_input "Enter the instance count for worker group $WORKER_GROUP_COUNT" "4")
-        
-        echo -e "${GREEN}Are you using training plans? (yes/no): ${NC}"
-        read -e USE_TRAINING_PLAN
+            if [[ $ADD_WORKER != "yes" ]]; then
+                break
+            fi
 
-        INSTANCE_GROUPS+=",
+            echo -e "${YELLOW}Configuring Worker Group $WORKER_GROUP_COUNT${NC}"
+            INSTANCE_TYPE=$(get_input "Enter the instance type for worker group $WORKER_GROUP_COUNT" "ml.c5.4xlarge" "instance_type")
+            INSTANCE_COUNT=$(get_input "Enter the instance count for worker group $WORKER_GROUP_COUNT" "4" "instance_count")
+            VOLUME_SIZE=$(get_input "Enter the volume size in GB for worker group $WORKER_GROUP_COUNT" "500" "volume_size_gb")
+            THREADS_PER_CORE=$(get_input "Enter threads per core for worker group $WORKER_GROUP_COUNT (1 or 2)" "1" "threads_per_core")
+                    
+            USE_TRAINING_PLAN=$(get_input "Are you using training plans? (yes/no):" "no" "use_training_plan")
+
+            INSTANCE_GROUPS+=",
         {
             \"InstanceGroupName\": \"worker-group-$WORKER_GROUP_COUNT\",
             \"InstanceType\": \"$INSTANCE_TYPE\",
@@ -589,7 +745,7 @@ create_config() {
             \"InstanceStorageConfigs\": [
                 {
                     \"EbsVolumeConfig\": {
-                        \"VolumeSizeInGB\": 500
+                        \"VolumeSizeInGB\": $VOLUME_SIZE
                     }
                 }
             ],
@@ -598,146 +754,145 @@ create_config() {
                 \"OnCreate\": \"on_create.sh\"
             },
             \"ExecutionRole\": \"${ROLE}\",
-            \"ThreadsPerCore\": 1"
+            \"ThreadsPerCore\": $THREADS_PER_CORE"
 
-        if [[ $USE_TRAINING_PLAN == "yes" ]]; then
-            echo -e "\n${BLUE}=== Training Plan Configuration ===${NC}"
-            # aws iam attach-role-policy --role-name $ROLENAME --policy-arn arn:aws:iam::aws:policy/AmazonEC2FullAccess
+            if [[ $USE_TRAINING_PLAN == "yes" ]]; then
+                echo -e "\n${BLUE}=== Training Plan Configuration ===${NC}"
+                # aws iam attach-role-policy --role-name $ROLENAME --policy-arn arn:aws:iam::aws:policy/AmazonEC2FullAccess
 
-            TRAINING_PLAN=$(get_input "Enter the training plan name" "")
+                TRAINING_PLAN=$(get_input "Enter the training plan name" "" "training_plan")
 
-            count=0
-            while true; do
-                # Attempt to describe the training plan
-                echo -e "${YELLOW}Attempting to retrieve training plan details...${NC}"
-                
-                if ! TRAINING_PLAN_DESCRIPTION=$(aws sagemaker describe-training-plan --training-plan-name "$TRAINING_PLAN" --output json 2>&1); then
-                    echo -e "${BLUE}❌Error: Training plan '$TRAINING_PLAN' not found. Please try again.${NC}"
-                    echo -e "${GREEN}Are you using training plans (Beta feature)? (yes/no)${NC}"
-                    read -e USE_TRAINING_PLAN
-                    if [[ $USE_TRAINING_PLAN != "yes" ]]; then
-                        echo -e "${YELLOW}Exiting training plan configuration.${NC}"
-                        break
-                    else
-                        TRAINING_PLAN=$(get_input "Enter the training plan name" "")   
-                    fi
-                else
-                    # Extract relevant information from the description
-                    TRAINING_PLAN_ARN=$(echo "$TRAINING_PLAN_DESCRIPTION" | jq -r '.TrainingPlanArn')
-                    AVAILABLE_INSTANCE_COUNT=$(echo "$TRAINING_PLAN_DESCRIPTION" | jq -r '.AvailableInstanceCount')
-                    TOTAL_INSTANCE_COUNT=$(echo "$TRAINING_PLAN_DESCRIPTION" | jq -r '.TotalInstanceCount')
-                    TRAINING_PLAN_AZ=$(echo "$TRAINING_PLAN_DESCRIPTION" | jq -r '.ReservedCapacitySummaries[0].AvailabilityZone')
-                    TP_INSTANCE_TYPE=$(echo "$TRAINING_PLAN_DESCRIPTION" | jq -r '.ReservedCapacitySummaries[0].InstanceType')
-
-                    CF_AZ=$(aws ec2 describe-subnets --subnet-ids $SUBNET_ID --output json | jq -r '.Subnets[0].AvailabilityZone')
-
-                    # Only print if count=0
-                    if [[ $count -eq 0 ]]; then
-                        echo -e "${GREEN}Training Plan Details:${NC}"
-                        echo -e "  ${YELLOW}Name:${NC} $TRAINING_PLAN"
-                        echo -e "  ${YELLOW}Available Instance Count:${NC} $AVAILABLE_INSTANCE_COUNT"
-                        echo -e "  ${YELLOW}Total Instance Count:${NC} $TOTAL_INSTANCE_COUNT"
-                        echo -e "  ${YELLOW}Training Plan Availability Zone:${NC} $TRAINING_PLAN_AZ"
-                        echo -e "  ${YELLOW}Training Plan Instance Type:${NC} $TP_INSTANCE_TYPE"
-                    fi
-
-                    # Compare INSTANCE_COUNT with AVAILABLE_INSTANCE_COUNT
-                    INSTANCE_COUNT_OK="n"
-                    if [[ $INSTANCE_COUNT -gt $AVAILABLE_INSTANCE_COUNT ]]; then
-                        echo -e "${YELLOW}Warning: The requested instance count ($INSTANCE_COUNT) is greater than the available instances in the training plan ($AVAILABLE_INSTANCE_COUNT).${NC}"
-                        echo -e "${BLUE}Do you want to continue anyway?(yes/no)${NC}"
-                        read -e CONTINUE
-                        if [[ $CONTINUE != "yes" ]]; then
-                            NEW_INSTANCE_COUNT=$(get_input "Enter the new number of instances" "1")
-                            # Update INSTANCE_GROUPS with new INSTANCE_COUNT for the current worker group
-                            INSTANCE_GROUPS=$(echo "$INSTANCE_GROUPS" | perl -pe '
-                                BEGIN {
-                                    $group = "worker-group-'"$WORKER_GROUP_COUNT"'";
-                                    $count = '"$NEW_INSTANCE_COUNT"';
-                                    $in_group = 0;
-                                }
-                                if (/"InstanceGroupName":\s*"$group"/) {
-                                    $in_group = 1;
-                                }
-                                if ($in_group && /"InstanceCount":\s*\d+/) {
-                                    s/("InstanceCount":\s*)\d+/$1$count/;
-                                    $in_group = 0;
-                                }
-                            ')
-                            INSTANCE_COUNT=$NEW_INSTANCE_COUNT
-                            echo -e "${GREEN}Updated instance count for worker-group-$WORKER_GROUP_COUNT to $INSTANCE_COUNT${NC}"
+                count=0
+                while true; do
+                    # Attempt to describe the training plan
+                    echo -e "${YELLOW}Attempting to retrieve training plan details...${NC}"
+                    
+                    if ! TRAINING_PLAN_DESCRIPTION=$(aws sagemaker describe-training-plan --training-plan-name "$TRAINING_PLAN" --output json --region $AWS_REGION 2>&1); then
+                        echo -e "${BLUE}❌Error: Training plan '$TRAINING_PLAN' not found. Please try again.${NC}"
+                        USE_TRAINING_PLAN=$(get_input "Are you using training plans? (yes/no):" "yes" "use_training_plan")
+                        if [[ $USE_TRAINING_PLAN != "yes" ]]; then
+                            echo -e "${YELLOW}Exiting training plan configuration.${NC}"
+                            break
+                        else
+                            TRAINING_PLAN=$(get_input "Enter the training plan name" "" "training_plan")   
                         fi
-                        INSTANCE_COUNT_OK="y"
                     else
-                        INSTANCE_COUNT_OK="y"    
-                    fi
+                        # Extract relevant information from the description
+                        TRAINING_PLAN_ARN=$(echo "$TRAINING_PLAN_DESCRIPTION" | jq -r '.TrainingPlanArn')
+                        AVAILABLE_INSTANCE_COUNT=$(echo "$TRAINING_PLAN_DESCRIPTION" | jq -r '.AvailableInstanceCount')
+                        TOTAL_INSTANCE_COUNT=$(echo "$TRAINING_PLAN_DESCRIPTION" | jq -r '.TotalInstanceCount')
+                        TRAINING_PLAN_AZ=$(echo "$TRAINING_PLAN_DESCRIPTION" | jq -r '.ReservedCapacitySummaries[0].AvailabilityZone')
+                        TP_INSTANCE_TYPE=$(echo "$TRAINING_PLAN_DESCRIPTION" | jq -r '.ReservedCapacitySummaries[0].InstanceType')
 
-                    if [[ $INSTANCE_COUNT_OK == "y" ]]; then
-                        INSTANCE_TYPE_OK="n"
-                        # Compare INSTANCE_TYPE with TP_INSTANCE_TYPE
-                        if [[ $INSTANCE_TYPE != $TP_INSTANCE_TYPE ]]; then
-                            echo -e "${YELLOW}Warning: The requested instance type ($INSTANCE_TYPE) does not match the instance type in the training plan ($TP_INSTANCE_TYPE).${NC}"
-                            echo -e "${BLUE}Do you want to continue anyway? If you choose "no", then the script will update instance type for you and proceed. (yes/no)${NC}"
+                        CF_AZ=$(aws ec2 describe-subnets --subnet-ids $SUBNET_ID --output json --region $AWS_REGION | jq -r '.Subnets[0].AvailabilityZone')
+
+                        # Only print if count=0
+                        if [[ $count -eq 0 ]]; then
+                            echo -e "${GREEN}Training Plan Details:${NC}"
+                            echo -e "  ${YELLOW}Name:${NC} $TRAINING_PLAN"
+                            echo -e "  ${YELLOW}Available Instance Count:${NC} $AVAILABLE_INSTANCE_COUNT"
+                            echo -e "  ${YELLOW}Total Instance Count:${NC} $TOTAL_INSTANCE_COUNT"
+                            echo -e "  ${YELLOW}Training Plan Availability Zone:${NC} $TRAINING_PLAN_AZ"
+                            echo -e "  ${YELLOW}Training Plan Instance Type:${NC} $TP_INSTANCE_TYPE"
+                        fi
+
+                        # Compare INSTANCE_COUNT with AVAILABLE_INSTANCE_COUNT
+                        INSTANCE_COUNT_OK="n"
+                        if [[ $INSTANCE_COUNT -gt $AVAILABLE_INSTANCE_COUNT ]]; then
+                            echo -e "${YELLOW}Warning: The requested instance count ($INSTANCE_COUNT) is greater than the available instances in the training plan ($AVAILABLE_INSTANCE_COUNT).${NC}"
+                            echo -e "${BLUE}Do you want to continue anyway?(yes/no)${NC}"
                             read -e CONTINUE
                             if [[ $CONTINUE != "yes" ]]; then
-                                NEW_INSTANCE_TYPE=$TP_INSTANCE_TYPE
-                                # Update INSTANCE_GROUPS with new INSTANCE_TYPE for the current worker group
+                                NEW_INSTANCE_COUNT=$(get_input "Enter the new number of instances" "1")
+                                # Update INSTANCE_GROUPS with new INSTANCE_COUNT for the current worker group
                                 INSTANCE_GROUPS=$(echo "$INSTANCE_GROUPS" | perl -pe '
                                     BEGIN {
-                                        $group = "worker-group-'$WORKER_GROUP_COUNT'";
-                                        $type = "'$NEW_INSTANCE_TYPE'";
+                                        $group = "worker-group-'"$WORKER_GROUP_COUNT"'";
+                                        $count = '"$NEW_INSTANCE_COUNT"';
                                         $in_group = 0;
                                     }
                                     if (/"InstanceGroupName":\s*"$group"/) {
                                         $in_group = 1;
                                     }
-                                    if ($in_group && /"InstanceType":\s*"[^"]*"/) {
-                                        s/("InstanceType":\s*")[^"]*"/$1$type"/;
+                                    if ($in_group && /"InstanceCount":\s*\d+/) {
+                                        s/("InstanceCount":\s*)\d+/$1$count/;
                                         $in_group = 0;
                                     }
                                 ')
-                                INSTANCE_TYPE=$NEW_INSTANCE_TYPE
-                                echo -e "${GREEN}Updated instance type for worker-group-$WORKER_GROUP_COUNT to $INSTANCE_TYPE${NC}"
+                                INSTANCE_COUNT=$NEW_INSTANCE_COUNT
+                                echo -e "${GREEN}Updated instance count for worker-group-$WORKER_GROUP_COUNT to $INSTANCE_COUNT${NC}"
                             fi
-                            INSTANCE_TYPE_OK="y"
+                            INSTANCE_COUNT_OK="y"
                         else
-                            INSTANCE_TYPE_OK="y"    
-                        fi       
+                            INSTANCE_COUNT_OK="y"    
+                        fi
 
-                        if [[ $INSTANCE_TYPE_OK == "y" ]]; then
-                            # Compare TRAINING_PLAN_AZ with CF_AZ
-                            if [[ $TRAINING_PLAN_AZ != $CF_AZ ]]; then
-                                echo -e "${YELLOW}Warning: The training plan availability zone ($TRAINING_PLAN_AZ) does not match the cluster availability zone ($CF_AZ).${NC}"
-                                echo -e "${BLUE}Do you want to continue anyway? (yes/no)${NC}"
+                        if [[ $INSTANCE_COUNT_OK == "y" ]]; then
+                            INSTANCE_TYPE_OK="n"
+                            # Compare INSTANCE_TYPE with TP_INSTANCE_TYPE
+                            if [[ $INSTANCE_TYPE != $TP_INSTANCE_TYPE ]]; then
+                                echo -e "${YELLOW}Warning: The requested instance type ($INSTANCE_TYPE) does not match the instance type in the training plan ($TP_INSTANCE_TYPE).${NC}"
+                                echo -e "${BLUE}Do you want to continue anyway? If you choose \"no\", then the script will update instance type for you and proceed. (yes/no)${NC}"
                                 read -e CONTINUE
                                 if [[ $CONTINUE != "yes" ]]; then
-                                    echo -e "${YELLOW}Please ensure that your VPC is in the same Availability Zone as your training plan (or vice versa). If you used the workshop, this should be the CF stack \"sagemaker-hyperpod\". Exiting training plan configuration.${NC}"
-                                    continue
+                                    NEW_INSTANCE_TYPE=$TP_INSTANCE_TYPE
+                                    # Update INSTANCE_GROUPS with new INSTANCE_TYPE for the current worker group
+                                    INSTANCE_GROUPS=$(echo "$INSTANCE_GROUPS" | perl -pe '
+                                        BEGIN {
+                                            $group = "worker-group-'$WORKER_GROUP_COUNT'";
+                                            $type = "'$NEW_INSTANCE_TYPE'";
+                                            $in_group = 0;
+                                        }
+                                        if (/"InstanceGroupName":\s*"$group"/) {
+                                            $in_group = 1;
+                                        }
+                                        if ($in_group && /"InstanceType":\s*"[^"]*"/) {
+                                            s/("InstanceType":\s*")[^"]*"/$1$type"/;
+                                            $in_group = 0;
+                                        }
+                                    ')
+                                    INSTANCE_TYPE=$NEW_INSTANCE_TYPE
+                                    echo -e "${GREEN}Updated instance type for worker-group-$WORKER_GROUP_COUNT to $INSTANCE_TYPE${NC}"
                                 fi
-                            fi
-                        fi  
-                    fi   
+                                INSTANCE_TYPE_OK="y"
+                            else
+                                INSTANCE_TYPE_OK="y"    
+                            fi       
 
-                    echo -e "${GREEN}Adding Training Plan ARN to instance group configuration.${NC}"    
-                    INSTANCE_GROUPS+=",
-                    \"TrainingPlanArn\": \"$TRAINING_PLAN_ARN\""  
-                    break
-                fi
-                count+=1
-            done       
-        fi  
+                            if [[ $INSTANCE_TYPE_OK == "y" ]]; then
+                                # Compare TRAINING_PLAN_AZ with CF_AZ
+                                if [[ $TRAINING_PLAN_AZ != $CF_AZ ]]; then
+                                    echo -e "${YELLOW}Warning: The training plan availability zone ($TRAINING_PLAN_AZ) does not match the cluster availability zone ($CF_AZ).${NC}"
+                                    echo -e "${BLUE}Do you want to continue anyway? (yes/no)${NC}"
+                                    read -e CONTINUE
+                                    if [[ $CONTINUE != "yes" ]]; then
+                                        echo -e "${YELLOW}Please ensure that your VPC is in the same Availability Zone as your training plan (or vice versa). If you used the workshop, this should be the CF stack \"sagemaker-hyperpod\". Exiting training plan configuration.${NC}"
+                                        continue
+                                    fi
+                                fi
+                            fi  
+                        fi   
 
-        INSTANCE_GROUPS+="
+                        echo -e "${GREEN}Adding Training Plan ARN to instance group configuration.${NC}"    
+                        INSTANCE_GROUPS+=",
+                        \"TrainingPlanArn\": \"$TRAINING_PLAN_ARN\""  
+                        break
+                    fi
+                    count+=1
+                done       
+            fi  
+
+            INSTANCE_GROUPS+="
         }"  
 
-        echo -e "${GREEN}✅ Worker Group $WORKER_GROUP_COUNT added${NC}"      
-        ((WORKER_GROUP_COUNT++))
-    done         
+            echo -e "${GREEN}✅ Worker Group $WORKER_GROUP_COUNT added${NC}"      
+            ((WORKER_GROUP_COUNT++))
+        done
+    fi
 
     INSTANCE_GROUPS+="]"
 
-    read -e -p "What would you like to name your cluster? (default: ml-cluster): " CLUSTER_NAME
-    CLUSTER_NAME=${CLUSTER_NAME:-ml-cluster}
+    CLUSTER_NAME=$(get_input "What would you like to name your cluster?" "ml-cluster" "cluster_name")
 
     # Create the cluster-config.json file
     cat > cluster-config.json << EOL
@@ -851,6 +1006,8 @@ EOL
     fi
     
     echo -e "${GREEN}✅ provisioning_parameters.json created successfully${NC}"
+    echo -e "${BLUE} Here is provisioning_parameters.json for your viewing${NC}"
+    cat provisioning_parameters.json
 
     # copy to the S3 Bucket
     echo -e "\n${BLUE}Copying configuration to S3 bucket...${NC}"
@@ -869,7 +1026,21 @@ EOL
         echo -e "1. Press Enter to continue with the rest of the script (Not Recommended)"
         echo -e "2. Press Ctrl+C to exit the script."
 
-        read -e -p "Select an option (Enter/Ctrl+C): " choice
+        if [[ -n "$CONFIG_FILE" && -f "$CONFIG_FILE" ]]; then
+            if command -v jq &> /dev/null; then
+                auto_mode=$(jq -r ".AUTO_MODE // \"false\"" "$CONFIG_FILE" 2>/dev/null)
+                if [[ "$auto_mode" == "true" ]]; then
+                    # Default to option 1 in AUTO_MODE
+                    choice=""
+                else
+                    read -e -p "Select an option (Enter/Ctrl+C): " choice
+                fi
+            else
+                read -e -p "Select an option (Enter/Ctrl+C): " choice
+            fi
+        else
+            read -e -p "Select an option (Enter/Ctrl+C): " choice
+        fi
 
         if [[ -z "$choice" ]]; then
             echo -e "${BLUE}Continuing with the rest of the script...${NC}"
@@ -880,6 +1051,7 @@ EOL
 
     echo -e "\n${BLUE}=== Cluster Configuration Complete ===${NC}"
 }
+
 
 validate_cluster_config() {
     echo "Validating your cluster configuration..."
@@ -919,14 +1091,12 @@ display_important_prereqs() {
     echo "   Ensure you install the following: pip, jq, boto3, and jsonschema"
 
     echo -e "\n${YELLOW}Ready to proceed? Press Enter to continue or Ctrl+C to exit...${NC}"
-    read
+    read_or_skip ""
 }
 
 region_check() {
-    echo -e "${BLUE}Please confirm that your AWS region is ${GREEN}$AWS_REGION${BLUE} (default).${NC}"
-    echo -e "${BLUE}If not, enter the AWS region where you want to set up your cluster (e.g., us-west-2):${NC}"
-    
-    read -p "> " NEW_REGION
+    echo -e "${BLUE}Please confirm that your AWS region is ${GREEN}$AWS_REGION${BLUE} (default).${NC}"    
+    NEW_REGION=$(get_input "If not, enter the AWS region where you want to set up your cluster (e.g., us-west-2):" "$AWS_REGION" "aws_region")
 
     if [[ -z "$NEW_REGION" ]]; then
         echo -e "${GREEN}✅ Using default region: ${YELLOW}$AWS_REGION${NC}"
@@ -939,14 +1109,14 @@ region_check() {
     echo -e "${BLUE}Ensure your chosen region supports SageMaker HyperPod.${NC}"
     echo -e "${GREEN}You can check out https://docs.aws.amazon.com/sagemaker/latest/dg/sagemaker-hyperpod.html#sagemaker-hyperpod-available-regions to learn about supported regions.${NC}"
     echo -e "${BLUE}Press Enter to continue...${NC}"
-    read
+    read_or_skip ""
 }
 
 # Function to create users in cluster
 configure_cluster_users() {
     echo -e "\n${BLUE}=== User Configuration ===${NC}"
     
-    CONFIGURE_USERS=$(get_input "Would you like to configure users? If not, you can still use the ubuntu user (yes/no)" "no")
+    CONFIGURE_USERS=$(get_input "Would you like to configure users? If not, you can still use the ubuntu user (yes/no)" "no" "configure_users")
 
     FIRST_SSM_INTEGRATION=true
     
@@ -961,110 +1131,152 @@ configure_cluster_users() {
         
         echo -e "${YELLOW}Enter user details (Press Ctrl+D when finished)${NC}"
         echo -e "${BLUE}========================================${NC}"
-        
-        while IFS= read -p "Enter username: " username; do
-            # If username is empty, skip this iteration
-            if [[ -z "$username" ]]; then
-                continue
+
+        # Check if we're in AUTO_MODE with users defined in config
+        AUTO_USERS=false
+        if [[ -n "$CONFIG_FILE" && -f "$CONFIG_FILE" ]]; then
+            if command -v jq &> /dev/null; then
+                auto_mode=$(jq -r ".AUTO_MODE // \"false\"" "$CONFIG_FILE" 2>/dev/null)
+                if [[ "$auto_mode" == "true" ]]; then
+                    # Try to get users array from config
+                    users_json=$(jq -r ".users // \"[]\"" "$CONFIG_FILE" 2>/dev/null)
+                    if [[ "$users_json" != "[]" && "$users_json" != "null" ]]; then
+                        AUTO_USERS=true
+                        user_count=$(echo "$users_json" | jq '. | length')
+                        
+                        echo -e "${GREEN}Using user configuration from config file (${user_count} users)${NC}"
+                        
+                        for ((i=0; i<user_count; i++)); do
+                            username=$(echo "$users_json" | jq -r ".[$i].username")
+                            user_id=$(echo "$users_json" | jq -r ".[$i].user_id")
+                            
+                            # Write to shared_users.txt
+                            echo "${username},${user_id},/fsx/${username}" >> shared_users.txt
+                            
+                            # Handle IAM association if specified
+                            iam_username=$(echo "$users_json" | jq -r ".[$i].iam_username // \"\"")
+                            if [[ -n "$iam_username" && "$iam_username" != "null" ]]; then
+                                # Add SSM Run As tag
+                                aws iam tag-user \
+                                    --user-name "$iam_username" \
+                                    --tags "[{\"Key\": \"SSMSessionRunAs\",\"Value\": \"$username\"}]" --output json
+                                
+                                echo -e "${GREEN}✅ SSM Run As tag added for ${iam_username} (will run as ${username})${NC}"
+                            fi
+                        done
+                        
+                        echo -e "${GREEN}✅ User configuration completed from config file${NC}"
+                    fi
+                fi
             fi
-            
-            # Get user ID with default value
-            user_id=$(get_input "Enter user ID" "$next_user_id")
-            
-            # Write to shared_users.txt
-            echo "${username},${user_id},/fsx/${username}" >> shared_users.txt
+        fi
 
-            # SSM Integration
-            ASSOCIATE_IAM=$(get_input "[REQUIRES ADMIN] Would you like to associate this POSIX user with an IAM user? (yes/no)" "no")
+        # Fall back to interactive mode if not handled by config
+        if [[ "$AUTO_USERS" != "true" ]]; then
+            while IFS= read -p "Enter username: " username; do
+                # If username is empty, skip this iteration
+                if [[ -z "$username" ]]; then
+                    continue
+                fi
+                
+                # Get user ID with default value
+                user_id=$(get_input "Enter user ID" "$next_user_id" "user_id")
+                
+                # Write to shared_users.txt
+                echo "${username},${user_id},/fsx/${username}" >> shared_users.txt
 
-            while [[ "${ASSOCIATE_IAM}" == "yes" ]]; do
-                if [[ "$FIRST_SSM_INTEGRATION" == true ]]; then
-                    echo -e "\n${BLUE}=== SSM Run As Configuration ===${NC}"
-                    echo -e "Now that we've created a new POSIX user, how do we ensure that users only connect as their user and not ssm-user when connecting via SSM? To do this, we use SSM run as tags, which allows us to tag an IAM user with the POSIX user (aka cluster user) they should connect to via SSM."
-                    read -p "Hit ENTER if you understand, or type "no" to skip this: " CONTINUE
-                    
-                    if [[ -z "$CONTINUE" ]]; then
-                        echo -e "\n${YELLOW}Please complete the following steps:${NC}"
+                # SSM Integration
+                ASSOCIATE_IAM=$(get_input "[REQUIRES ADMIN] Would you like to associate this POSIX user with an IAM user? (yes/no)" "no" "associate_iam")
+
+                while [[ "${ASSOCIATE_IAM}" == "yes" ]]; do
+                    if [[ "$FIRST_SSM_INTEGRATION" == true ]]; then
+                        echo -e "\n${BLUE}=== SSM Run As Configuration ===${NC}"
+                        echo -e "Now that we've created a new POSIX user, how do we ensure that users only connect as their user and not ssm-user when connecting via SSM? To do this, we use SSM run as tags, which allows us to tag an IAM user with the POSIX user (aka cluster user) they should connect to via SSM."
+                        CONTINUE=$(get_input "Hit ENTER if you understand, or type \"no\" to skip this" "" "continue_ssm_setup")
                         
-                        echo -e "1. Navigate to the Session Manager Preferences Console"
-                        echo -e "   (https://console.aws.amazon.com/systems-manager/session-manager/preferences)"
-                        read -p "Hit ENTER once you are there: "
-                        
-                        echo -e "\n2. Under 'Specify Operating System user for sessions',"
-                        echo -e "   ✅ check the 'Enable Run As Support for Linux Instances'"
-                        read -p "Hit ENTER once step is complete: "
-                        
-                        echo -e "\n3. Change the Linux shell profile."
-                        echo -e "   It should have '/bin/bash -c 'export HOME=/fsx/\$(whoami) && cd \${HOME} && exec /bin/bash' in its first and only line"
-                        read -p "Hit ENTER once you've added this line in: "
-                        
-                        echo -e "\n${GREEN}✅ SSM Run As support configured successfully${NC}"
+                        if [[ -z "$CONTINUE" ]]; then
+                            echo -e "\n${YELLOW}Please complete the following steps:${NC}"
+                            
+                            echo -e "1. Navigate to the Session Manager Preferences Console"
+                            echo -e "   (https://console.aws.amazon.com/systems-manager/session-manager/preferences)"
+                            read_or_skip "Hit ENTER once you are there: "
+                            
+                            echo -e "\n2. Under 'Specify Operating System user for sessions',"
+                            echo -e "   ✅ check the 'Enable Run As Support for Linux Instances'"
+                            read_or_skip "Hit ENTER once step is complete: "
+                            
+                            echo -e "\n3. Change the Linux shell profile."
+                            echo -e "   It should have '/bin/bash -c 'export HOME=/fsx/\$(whoami) && cd \${HOME} && exec /bin/bash' in its first and only line"
+                            read_or_skip "Hit ENTER once you've added this line in: "
+                            
+                            echo -e "\n${GREEN}✅ SSM Run As support configured successfully${NC}"
+                        else
+                            echo -e "${YELLOW}Skipping SSM Run As configuration instructions...${NC}"
+                            break
+                        fi
+                        FIRST_SSM_INTEGRATION=false
+                    fi
+
+                    IAM_USERNAME=$(get_input "Enter the IAM username to associate with POSIX user ${username}" "$username" "iam_username")
+
+                    if ! aws iam get-user --user-name "${IAM_USERNAME}" --output json >/dev/null 2>&1; then
+                        echo -e "${YELLOW}⚠️  IAM user ${IAM_USERNAME} does not exist${NC}"
+                        CREATE_IAM=$(get_input "Would you like to create this IAM user? (Note: You'll need to add permissions later) (yes/no)" "no" "create_iam")
+
+                        if [[ "${CREATE_IAM}" == "yes" ]]; then
+                            if ! output=$(aws iam create-user --user-name "$IAM_USERNAME" --output json 2>&1); then
+                                echo -e "${YELLOW}⚠️  Error creating IAM user ${IAM_USERNAME}:${NC}"
+                                echo -e "${YELLOW}$output${NC}"
+                                ASSOCIATE_IAM=$(get_input "Would you like to try associating with a different IAM user? (yes/no)" "yes" "retry_associate_iam")
+                                continue
+                            else
+                                echo -e "${GREEN}✅ IAM user ${IAM_USERNAME} created successfully. Reminder to add permissions to this user as required!${NC}"
+                            fi
+                        else
+                            ASSOCIATE_IAM=$(get_input "Would you like to try associating with a different IAM user? (yes/no)" "yes" "retry_associate_iam")
+                            continue
+                        fi
+                    fi
+                
+                    if ! output=$(aws iam tag-user \
+                        --user-name "$IAM_USERNAME" \
+                        --tags "[{\"Key\": \"SSMSessionRunAs\",\"Value\": \"$username\"}]" --output json 2>&1); then
+                        echo -e "${YELLOW}⚠️  Error adding SSM Run As tag for ${IAM_USERNAME}:${NC}"
+                        echo -e "${YELLOW}$output${NC}"
+                        ASSOCIATE_IAM=$(get_input "Would you like to try associating with a different IAM user? (yes/no)" "yes" "retry_associate_iam")
+                        continue
                     else
-                        echo -e "${YELLOW}Skipping SSM Run As configuration instructions...${NC}"
+                        echo -e "${GREEN}✅ SSM Run As tag added for ${IAM_USERNAME} (will run as ${username})${NC}"
                         break
                     fi
-                    FIRST_SSM_INTEGRATION=false
+                done
+                
+                # Increment the next_user_id
+                if [[ "$user_id" == "$next_user_id" ]]; then
+                    ((next_user_id++))
                 fi
-
-                IAM_USERNAME=$(get_input "Enter the IAM username to associate with POSIX user ${username}" "$username")
-
-                if ! aws iam get-user --user-name "${IAM_USERNAME}" --output json >/dev/null 2>&1; then
-                    echo -e "${YELLOW}⚠️  IAM user ${IAM_USERNAME} does not exist${NC}"
-                    CREATE_IAM=$(get_input "Would you like to create this IAM user? (Note: You'll need to add permissions later) (yes/no)" "no")
-
-                    if [[ "${CREATE_IAM}" == "yes" ]]; then
-                        if ! output=$(aws iam create-user --user-name "$IAM_USERNAME" --output json 2>&1); then
-                            echo -e "${YELLOW}⚠️  Error creating IAM user ${IAM_USERNAME}:${NC}"
-                            echo -e "${YELLOW}$output${NC}"
-                            ASSOCIATE_IAM=$(get_input "Would you like to try associating with a different IAM user? (yes/no)" "yes")
-                            continue
-                        else
-                            echo -e "${GREEN}✅ IAM user ${IAM_USERNAME} created successfully. Reminder to add permissions to this user as required!${NC}"
-                        fi
-                    else
-                        ASSOCIATE_IAM=$(get_input "Would you like to try associating with a different IAM user? (yes/no)" "yes")
-                        continue
-                    fi
-                fi
-            
-                if ! output=$(aws iam tag-user \
-                    --user-name "$IAM_USERNAME" \
-                    --tags "[{\"Key\": \"SSMSessionRunAs\",\"Value\": \"$username\"}]" --output json 2>&1); then
-                    echo -e "${YELLOW}⚠️  Error adding SSM Run As tag for ${IAM_USERNAME}:${NC}"
-                    echo -e "${YELLOW}$output${NC}"
-                    ASSOCIATE_IAM=$(get_input "Would you like to try associating with a different IAM user? (yes/no)" "yes")
-                    continue
-                else
-                    echo -e "${GREEN}✅ SSM Run As tag added for ${IAM_USERNAME} (will run as ${username})${NC}"
-                    break
-                fi
+                
+                echo -e "${BLUE}========================================${NC}"
             done
-            
-            # Increment the next_user_id
-            if [[ "$user_id" == "$next_user_id" ]]; then
-                ((next_user_id++))
-            fi
-            
-            echo -e "${BLUE}========================================${NC}"
-        done
+        fi
         
         echo -e "${GREEN}✅ User configuration completed. Users have been written to shared_users.txt${NC}"
         echo -e "\n${BLUE}Please review the user configuration below. Press Enter to confirm and upload to S3, or Ctrl+C to exit${NC}"
         echo -e "${YELLOW}Contents of shared_users.txt:${NC}"
         cat shared_users.txt
 
-        read
+        read_or_skip ""
 
         echo -e "${BLUE}Uploading shared_users.txt to S3 bucket: $BUCKET...${NC}"
 
-        if ! output=$(aws s3 cp shared_users.txt s3://${BUCKET}/src/ --output json 2>&1); then
+        if ! output=$(aws s3 cp shared_users.txt s3://${BUCKET}/src/ --output json --region $AWS_REGION 2>&1); then
             echo -e "${YELLOW}⚠️  Error occurred while uploading shared_users.txt to S3 bucket:${NC}"
             echo -e "${YELLOW}$output${NC}"
             echo -e "Options:"
             echo -e "1. Press Enter to continue with the rest of the script (If you do this, please make sure you upload the file manually before creating the cluster)"
             echo -e "2. Press Ctrl+C to exit the script."
             
-            read -e -p "Select an option (Enter/Ctrl+C): " choice
+            choice=$(get_input "Select an option (Enter/Ctrl+C)" "" "error_choice")
             
             if [[ -z "$choice" ]]; then
                 echo -e "${BLUE}Continuing with the rest of the script...${NC}"
@@ -1101,7 +1313,21 @@ create_cluster() {
         echo -e "${GREEN}    --cli-input-json file://cluster-config.json \\"
         echo -e "${GREEN}    --region $AWS_REGION --output json${NC}\n"
 
-        read -e -p "Select an option (Enter/Ctrl+C): " choice
+        if [[ -n "$CONFIG_FILE" && -f "$CONFIG_FILE" ]]; then
+            if command -v jq &> /dev/null; then
+                auto_mode=$(jq -r ".AUTO_MODE // \"false\"" "$CONFIG_FILE" 2>/dev/null)
+                if [[ "$auto_mode" == "true" ]]; then
+                    # Default to option 1 in AUTO_MODE
+                    choice=""
+                else
+                    read -e -p "Select an option (Enter/Ctrl+C): " choice
+                fi
+            else
+                read -e -p "Select an option (Enter/Ctrl+C): " choice
+            fi
+        else
+            read -e -p "Select an option (Enter/Ctrl+C): " choice
+        fi
 
         if [[ -z "$choice" ]]; then
             echo -e "${BLUE}Continuing with the rest of the script...${NC}"
@@ -1110,7 +1336,7 @@ create_cluster() {
         fi
     else
         echo -e "${GREEN}✅ Cluster creation request submitted successfully. To monitor the progress of cluster creation, you can either check the SageMaker console, or you can run:.${NC}"    
-        echo -e "${YELLOW}watch -n 1 aws sagemaker list-clusters --output table${NC}"
+        echo -e "${YELLOW}watch -n 1 aws sagemaker list-clusters --output table --region $AWS_REGION${NC}"
     fi
 }
 
@@ -1144,7 +1370,7 @@ main() {
     echo -e "\n${BLUE}🔍 AWS Account Verification${NC}"
     echo -e "Your AWS Account ID is: ${GREEN}$AWS_ACCOUNT_ID${NC}"
     echo "Press Enter to confirm ✅ or Ctrl+C to exit❌..."
-    read
+    read_or_skip ""
 
     # Checking Git installation
     check_git
@@ -1181,7 +1407,21 @@ main() {
         echo -e "1. Press Enter to continue with the rest of the script (Not Recommended, unless you know how to set the environment variables manually!)"
         echo -e "2. Press Ctrl+C to exit the script."
 
-        read -e -p "Select an option (Enter/Ctrl+C): " choice
+        if [[ -n "$CONFIG_FILE" && -f "$CONFIG_FILE" ]]; then
+            if command -v jq &> /dev/null; then
+                auto_mode=$(jq -r ".AUTO_MODE // \"false\"" "$CONFIG_FILE" 2>/dev/null)
+                if [[ "$auto_mode" == "true" ]]; then
+                    # Default to option 1 in AUTO_MODE
+                    choice=""
+                else
+                    read -e -p "Select an option (Enter/Ctrl+C): " choice
+                fi
+            else
+                read -e -p "Select an option (Enter/Ctrl+C): " choice
+            fi
+        else
+            read -e -p "Select an option (Enter/Ctrl+C): " choice
+        fi
 
         if [[ -z "$choice" ]]; then
             echo -e "${BLUE}Continuing with the rest of the script...${NC}"
@@ -1193,7 +1433,7 @@ main() {
     
     echo -e "${BLUE}ℹ️  For your viewing, here's the cluster configuration generated. Please make sure it looks right before proceeding. Press enter to continue, or Ctrl+C to exit and make changes${NC}"
     echo -e "${YELLOW}$(cat cluster-config.json | jq . --color-output)${NC}"
-    read
+    read_or_skip ""
 
     configure_cluster_users
 
@@ -1203,8 +1443,7 @@ main() {
     echo -e "${GREEN}Congratulations! You've completed all the preparatory steps.${NC}"
     echo -e "${YELLOW}Next Steps:${NC}"
 
-    CREATE_CLUSTER=$(get_input "Do you want the script to create the cluster for you now? (yes/no):" "yes")
-    # read -e -p "Do you want the script to create the cluster for you now? (yes/no): " CREATE_CLUSTER
+    CREATE_CLUSTER=$(get_input "Do you want the script to create the cluster for you now? (yes/no):" "yes" "create_cluster")
     if [[ "$CREATE_CLUSTER" == "yes" ]]; then
         warning
         create_cluster
@@ -1218,7 +1457,7 @@ main() {
         echo -e "${GREEN}    --region $AWS_REGION --output json${NC}\n"
 
         echo -e "${YELLOW}To monitor the progress of cluster creation, you can either check the SageMaker console, or you can run:.${NC}"    
-        echo -e "${GREEN}watch -n 1 aws sagemaker list-clusters --output table${NC}"
+        echo -e "${GREEN}watch -n 1 aws sagemaker list-clusters --output table --region $AWS_REGION${NC}"
 
         \
         warning
