@@ -350,7 +350,7 @@ jobs:
 
             INSTANCE_GROUPS=$(cat artifacts/cluster-details-${{ env.CLUSTER_NAME }}.json | jq -r '.InstanceGroups[].InstanceGroupName')
             for GROUP in $INSTANCE_GROUPS; do
-              IG_STATUS=$(cat artifacts/cluster-details-${{ env.CLUSTER_NAME }}.json | jq -r '.InstanceGroups[] | select(.InstanceGroupName == \"$GROUP\").Status')
+              IG_STATUS=$(cat artifacts/cluster-details-${{ env.CLUSTER_NAME }}.json | jq -r --arg group "$GROUP" '.InstanceGroups[] | select(.InstanceGroupName == $group).Status')
               echo "Instance group $GROUP status: $IG_STATUS"
             done
             
