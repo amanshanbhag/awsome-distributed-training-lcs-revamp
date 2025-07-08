@@ -39,7 +39,7 @@ jobs:
           CONTROLLER_COUNT=1
 
           # Define worker groups - can be extended with more types in the future
-          WORKER_GROUPS="${{ env.WORKER_GROUPS }}""
+          WORKER_GROUPS="${{ env.WORKER_GROUPS }}"
 
           # Parse worker groups from env var
           declare -a WORKER_TYPES=()
