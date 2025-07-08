@@ -17,7 +17,7 @@ env:
   AWS_ACCOUNT_ID: ${{ secrets.AWS_ACCOUNT_ID }}
   AWS_REGION: "us-east-2"
   CONTROLLER_TYPE: "ml.m5.12xlarge"
-  WORKER_GROUPS: "ml.c5.4xlarge,3;ml.c5.48xlarge,1"
+  WORKER_GROUPS: "ml.c5.4xlarge,3;ml.c5.4xlarge,1"
 
 
 jobs:
@@ -39,7 +39,7 @@ jobs:
           CONTROLLER_COUNT=1
 
           # Define worker groups - can be extended with more types in the future
-          WORKER_GROUPS=${{ env.WORKER_GROUPS }}
+          WORKER_GROUPS="${{ env.WORKER_GROUPS }}""
 
           # Parse worker groups from env var
           declare -a WORKER_TYPES=()
