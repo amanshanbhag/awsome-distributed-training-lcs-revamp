@@ -233,9 +233,22 @@ jobs:
     steps:
       - name: Checkout repository
         uses: actions/checkout@v4
-                  
+        
+      - name: Set up environment
+        run: |
+          echo "Setting up environment..."
+          sudo apt-get update
+          # sudo apt-get install -y jq curl unzip
+          # sudo apt-get install -y python3-venv
+          # python3 -m venv ~/venv
+          # source ~/venv/bin/activate
+          # pip install --upgrade pip
+          # pip install boto3 jsonschema
+          mkdir -p artifacts
+          
       - name: Create config file
         run: |
+          source ~/venv/bin/activate
           # Create a unique cluster name using the run ID
           CLUSTER_NAME="ci-lcs-test-${{ github.run_id }}"
           echo "CLUSTER_NAME=$CLUSTER_NAME" >> $GITHUB_ENV
