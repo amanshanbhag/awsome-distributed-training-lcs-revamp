@@ -248,7 +248,6 @@ jobs:
           
       - name: Create config file
         run: |
-          source ~/venv/bin/activate
           # Create a unique cluster name using the run ID
           CLUSTER_NAME="ci-lcs-test-${{ github.run_id }}"
           echo "CLUSTER_NAME=$CLUSTER_NAME" >> $GITHUB_ENV
