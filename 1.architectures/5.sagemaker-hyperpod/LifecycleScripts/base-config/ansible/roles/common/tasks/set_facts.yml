@@ -1,7 +1,7 @@
 ---
 - name: Load provisioning parameters
   ansible.builtin.include_vars:
-    file: provisioning_parameters.json
+    file: "{{ playbook_dir }}/../vars/provisioning_parameters.json"
     name: provisioning
 
 - name: Load resource config
@@ -79,7 +79,7 @@
 - name: Failover if instance not found in resource config file
   ansible.builtin.fail:
     msg: "Instance not found in resource config file."
-  when: node_group is not defined or node_group
+  when: node_group is not defined or node_group | trim == ""
 
 - name: Set feature flags from provisioning_parameters
   ansible.builtin.set_fact:
