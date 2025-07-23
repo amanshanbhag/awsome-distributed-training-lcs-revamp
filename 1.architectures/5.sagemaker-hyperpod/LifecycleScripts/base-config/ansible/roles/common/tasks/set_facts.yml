@@ -60,18 +60,18 @@
 
 - name: Get controller node IPs
   ansible.builtin.set_fact:
-    controller_ips: "{{ resource_config.InstanceGroups | selectattr('Name', 'equalto', provisioning.controller_group) | map(attribute='Instances') | flatten | map(attribute='CustomerIpAddress') | list }}"
+    controller_ips: "{{ resource_config.InstanceGroups | selectattr('Name', 'equalto', provisioning.controller_group | default('')) | map(attribute='Instances') | flatten | map(attribute='CustomerIpAddress') | list }}"
 
 - name: Get login node IPs
   ansible.builtin.set_fact:
-    login_ips: "{{ resource_config.InstanceGroups | selectattr('Name', 'equalto', provisioning.login_group) | map(attribute='Instances') | flatten | map(attribute='CustomerIpAddress') | list }}"
+    login_ips: "{{ resource_config.InstanceGroups | selectattr('Name', 'equalto', provisioning.login_group | default('')) | map(attribute='Instances') | flatten | map(attribute='CustomerIpAddress') | list }}"
 
 - name: Set node role (login/controller/compute)
   ansible.builtin.set_fact:
     node_role: >-
-      {% if node_group == provisioning.controller_group %}
+      {% if provisioning.controller_group is defined and node_group == provisioning.controller_group %}
         controller
-      {% elif node_group == provisioning.login_group %}
+      {% elif provisioning.login_group is defined and node_group == provisioning.login_group %}
         login
       {% else %}
         compute
