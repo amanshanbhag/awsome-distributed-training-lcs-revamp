@@ -17,7 +17,7 @@ env:
   AWS_ACCOUNT_ID: ${{ secrets.AWS_ACCOUNT_ID }}
   AWS_REGION: "us-east-2"
   CONTROLLER_TYPE: "ml.m5.12xlarge"
-  WORKER_GROUPS: "ml.c5.4xlarge,3;ml.c5.4xlarge,1"
+  WORKER_GROUPS: "ml.c5.4xlarge,2;ml.g5.8xlarge,2"
 
 
 jobs:
