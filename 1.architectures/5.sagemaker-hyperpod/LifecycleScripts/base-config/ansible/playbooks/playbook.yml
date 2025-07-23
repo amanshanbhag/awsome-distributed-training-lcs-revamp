@@ -1,8 +1,8 @@
 ---
 - name: SageMaker HyperPod Slurm Lifecycle Configuration
   hosts: localhost
-  become: yes
-  gather_facts: yes
+  become: true
+  gather_facts: true
   vars_files: 
     - ../vars/main.yml
 

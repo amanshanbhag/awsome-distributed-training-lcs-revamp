@@ -86,7 +86,7 @@
     workload_manager: "{{ provisioning.workload_manager }}"
     fsx_dns_name: "{{ provisioning.fsx_dns_name | default('') }}"
     fsx_mountname: "{{ provisioning.fsx_mountname | default('') }}"
-    fsx_openzfs_dns_name: "{{ provisioning.fsx_openzfs_dns_name | default('') "
+    fsx_openzfs_dns_name: "{{ provisioning.fsx_openzfs_dns_name | default('') }}"
     enable_slurm_configurations: "{{ provisioning.slurm_configurations is defined and provisioning.slurm_configurations | length > 0 }}"
 
 - name: DEBUG node information
