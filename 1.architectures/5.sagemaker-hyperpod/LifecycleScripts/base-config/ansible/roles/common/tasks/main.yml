@@ -1,0 +1,7 @@
+---
+- name: Include set_facts tasks
+  include_tasks: set_facts.yml
+
+- name: Wait for Slurm configuration
+  include_tasks: wait_for_slurm_config.yml
+  when: workload_manager == "slurm"

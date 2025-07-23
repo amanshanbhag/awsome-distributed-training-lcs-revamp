@@ -12,6 +12,8 @@ logger() {
 }
 
 PROVISIONING_PARAMETERS_PATH="provisioning_parameters.json"
+SCRIPT_DIR="$( cd "$( dirname "${BASH_SOURCE[0]}" )" && pwd )"
+ANSIBLE_DIR="${SCRIPT_DIR}/ansible"
 
 # Adding to give systemd-resolved (DNS service) enough time to get rebooted (by HostAgent) so that network is available during LCS execution
 sleep 30
@@ -33,6 +35,41 @@ else
   fi
 fi
 
+# Step 1: Install Ansible using the original script
+logger "Installing Ansible..."
+sudo bash "${SCRIPT_DIR}/utils/install_ansible.sh" >  >(tee -a $LOG_FILE) 2>&1
+
+# Step 2: Copy provisioning parameters to the Ansible directory
+logger "Copying provisioning parameters to Ansible directory..."
+mkdir -p "${ANSIBLE_DIR}/vars"
+cp "$PROVISIONING_PARAMETERS_PATH" "${ANSIBLE_DIR}/vars/provisioning_parameters.json"
+
+# Step 3: Run the Ansible playbook
+logger "Running Ansible playbook..."
+cd "${ANSIBLE_DIR}"
+ansible-playbook playbooks/playbook.yml -v >  >(tee -a $LOG_FILE) 2>&1
+ansible_exit_code=$?
+
+if [ $ansible_exit_code -ne 0 ]; then
+  logger "Ansible playbook execution failed with exit code $ansible_exit_code"
+  exit $ansible_exit_code
+fi
+
+# After running the Ansible playbook, extract facts from Ansible
+logger "Extracting Ansible facts..."
+cd "${ANSIBLE_DIR}"
+ansible localhost -m setup > /tmp/ansible_facts.json 2>/dev/null || true
+
+# Extract node IP and role from Ansible facts if available
+if [ -f /tmp/ansible_facts.json ]; then
+  export ANSIBLE_NODE_IP=$(grep -o '"self_ip": "[^"]*' /tmp/ansible_facts.json | cut -d'"' -f4)
+  export ANSIBLE_NODE_ROLE=$(grep -o '"node_role": "[^"]*' /tmp/ansible_facts.json | cut -d'"' -f4)
+  logger "Ansible facts: Node IP=${ANSIBLE_NODE_IP}, Node Role=${ANSIBLE_NODE_ROLE}"
+fi
+
+# Step 4: Continue with original script for parts not yet converted
+logger "Running remaining original scripts..."
+cd "${SCRIPT_DIR}"
 logger "Running lifecycle_script.py with resourceConfig: $SAGEMAKER_RESOURCE_CONFIG_PATH, provisioning_parameters: $PROVISIONING_PARAMETERS_PATH"
 
 python3 -u lifecycle_script.py \

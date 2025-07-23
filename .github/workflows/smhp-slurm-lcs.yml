@@ -1,4 +1,4 @@
-name: SageMaker HyperPod Cluster LifecycleScripts CI/CD. This CI tests for a Slurm cluster with 4 x ml.c5.4xlarge + 1 x ml.c5.4xlarge.
+name: SageMaker HyperPod Cluster LifecycleScripts CI/CD. This CI tests for a Slurm cluster with 2 x ml.c5.4xlarge + 2 x ml.g5.8xlarge.
 
 # To change the test, change the check-quota job's WORKER_GROUPS definition (and limits, egs training plan etc), and the test-cluster-creation job's ci-lcs-test config definition. 
 

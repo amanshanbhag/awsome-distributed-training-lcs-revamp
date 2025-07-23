@@ -1,0 +1,26 @@
+---
+- name: Check if slurm.conf exists
+  ansible.builtin.stat:
+    path: "{{ slurm_conf_path | default('/opt/slurm/etc/slurm.conf') }}"
+  register: slurm_conf_stat
+
+- name: Wait for slurm.conf to contain controller IPs
+  ansible.builtin.shell: "grep -q '{{ item }}' {{ slurm_conf_path | default('/opt/slurm/etc/slurm.conf') }}"
+  register: slurm_conf_check
+  until: slurm_conf_check.rc == 0
+  retries: 12
+  delay: 5
+  with_items: "{{ controller_ips }}"
+  when: slurm_conf_stat.stat.exists
+  ignore_errors: true
+  failed_when: false
+
+- name: Log message if slurm.conf is not present
+  ansible.builtin.debug:
+    msg: "slurm.conf is not present. It is fine for login/compute nodes"
+  when: not slurm_conf_stat.stat.exists
+
+- name: Log message if slurm.conf contains controller IP(s)
+  ansible.builtin.debug:
+    msg: "slurm.conf found. It contains at least one controller address"
+  when: slurm_conf_stat.stat.exists and slurm_conf_check.results is defined and slurm_conf_check.results | selectattr('rc', 'equalto', 0) | list | length > 0

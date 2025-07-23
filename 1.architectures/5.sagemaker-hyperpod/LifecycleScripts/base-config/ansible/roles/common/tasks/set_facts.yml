@@ -1,0 +1,104 @@
+---
+- name: Load provisioning parameters
+  ansible.builtin.include_vars:
+    file: provisioning_parameters.json
+    name: provisioning
+
+- name: Load resource config
+  ansible.builtin.include_vars:
+    file: /opt/ml/config/resource_config.json
+    name: resource_config
+
+# Migrate from Python to C
+- name: Get current IP address with retries
+  ansible.builtin.shell: |
+    python3 -c "
+    import socket
+    import time
+    max_retries = 7
+    retry_delay_seconds = 5
+    IP = '127.0.0.1'
+    retry_count = 0
+    while retry_count < max_retries:
+        try:
+          s = socket.socket(socket.AF_INET, socket.SOCK_DGRAM)
+          s.connect(('10.254.254.254', 1))
+          IP = s.getsockname()[0]
+          break
+        except Exception as e:
+          print(f"Failed to get IP address of the current host. Reason: {repr(e)}.")            
+          retry_count += 1
+          if retry_count < max_retries:
+            print(f"Retrying in {retry_delay_seconds} seconds...")
+            time.sleep(retry_delay_seconds)
+            retry_delay_seconds *= 2
+          else:
+            print(f"Max retries reached. Giving up.")
+            raise
+        finally:
+          s.close()
+    print(IP)
+    "
+  register: ip_address_result
+  changed_when: false
+
+- name: Set self IP
+  ansible.builtin.set_fact:
+    self_ip: "{{ ip_address_result.stdout | trim }}"
+
+- name: Find instance group by address
+  ansible.builtin.set_fact:
+    node_group: >-
+      {% for group in resource_config.InstanceGroups %}
+        {% for instance in group.Instances | default([]) %}
+          {% if instance.get('CustomerIpAddress') == self_ip %}
+            {{ group.Name }}
+          {% endif %}
+        {% endfor %}
+      {% endfor %}
+
+- name: Get controller node IPs
+  ansible.builtin.set_fact:
+    controller_ips: "{{ resource_config.InstanceGroups | selectattr('Name', 'equalto', provisioning.controller_group) | map(attribute='Instances') | flatten | map(attribute='CustomerIpAddress') | list }}"
+
+- name: Get login node IPs
+  ansible.builtin.set_fact:
+    login_ips: "{{ resource_config.InstanceGroups | selectattr('Name', 'equalto', provisioning.login_group) | map(attribute='Instances') | flatten | map(attribute='CustomerIpAddress') | list }}"
+
+- name: Set node role (login/controller/compute)
+  ansible.builtin.set_fact:
+    node_role: >-
+      {% if node_group == provisioning.controller_group %}
+        controller
+      {% elif node_group == provisioning.login_group %}
+        login
+      {% else %}
+        compute
+      {% endif %}
+
+- name: Failover if instance not found in resource config file
+  ansible.builtin.fail:
+    msg: "Instance not found in resource config file."
+  when: node_group is not defined or node_group
+
+- name: Set feature flags from provisioning_parameters
+  ansible.builtin.set_fact:
+    workload_manager: "{{ provisioning.workload_manager }}"
+    fsx_dns_name: "{{ provisioning.fsx_dns_name | default('') }}"
+    fsx_mountname: "{{ provisioning.fsx_mountname | default('') }}"
+    fsx_openzfs_dns_name: "{{ provisioning.fsx_openzfs_dns_name | default('') "
+    enable_slurm_configurations: "{{ provisioning.slurm_configurations is defined and provisioning.slurm_configurations | length > 0 }}"
+
+- name: DEBUG node information
+  ansible.builtin.debug:
+    msg: >
+      Node IP: {{ self_ip }}
+      Node group: {{ node_group }}
+      Node role: {{ node_role }}
+      Controller IPs: {{ controller_ips }}
+      Login IPs: {{ login_ips }}
+      Workload manager: {{ workload_manager }}
+      FSX DNS name: {{ fsx_dns_name }}
+      FSX mountname: {{ fsx_mountname }}
+      FSX OpenZFS DNS name: {{ fsx_openzfs_dns_name }}
+      Enable slurm configurations: {{ enable_slurm_configurations }}

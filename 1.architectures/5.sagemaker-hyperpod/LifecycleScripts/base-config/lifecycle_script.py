@@ -174,7 +174,7 @@ def main(args):
     params = ProvisioningParameters(args.provisioning_parameters)
     resource_config = ResourceConfig(args.resource_config)
 
-    ExecuteBashScript("./utils/install_ansible.sh").run()
+    # ExecuteBashScript("./utils/install_ansible.sh").run()
 
     fsx_dns_name, fsx_mountname = params.fsx_settings
     if fsx_dns_name and fsx_mountname:
@@ -192,24 +192,33 @@ def main(args):
     if params.workload_manager == "slurm":
         # Wait until slurm will be configured
         controllers = resource_config.get_list_of_addresses(params.controller_group)
-        wait_for_slurm_conf(controllers)
+        # wait_for_slurm_conf(controllers)
 
         print("This is a slurm cluster. Do additional slurm setup")
-        self_ip = get_ip_address()
+        # self_ip = get_ip_address()
+        self_ip = os.environ.get("ANSIBLE_NODE_IP", get_ip_address())
         head_node_ip = resource_config.get_list_of_addresses(params.controller_group)
         login_node_ip = resource_config.get_list_of_addresses(params.login_group)
         print(f"This node ip address is {self_ip}")
 
-        group, instance = resource_config.find_instance_by_address(self_ip)
-        if instance is None:
-            raise ValueError("This instance not found in resource config. Can't process")
-        print(group)
+        # group, instance = resource_config.find_instance_by_address(self_ip)
+        # if instance is None:
+        #     raise ValueError("This instance not found in resource config. Can't process")
+        # print(group)
 
-        node_type = SlurmNodeType.COMPUTE_NODE
-        if group.get("Name") == params.controller_group:
+        # node_type = SlurmNodeType.COMPUTE_NODE
+        # if group.get("Name") == params.controller_group:
+        #     node_type = SlurmNodeType.HEAD_NODE
+        # elif group.get("Name") == params.login_group:
+        #     node_type = SlurmNodeType.LOGIN_NODE
+
+        ansible_node_role = os.environ.get("ANSIBLE_NODE_ROLE", "compute")
+        if ansible_node_role == "controller":
             node_type = SlurmNodeType.HEAD_NODE
-        elif group.get("Name") == params.login_group:
+        elif ansible_node_role == "login":
             node_type = SlurmNodeType.LOGIN_NODE
+        else:
+            node_type = SlurmNodeType.COMPUTE_NODE
 
         if node_type == SlurmNodeType.HEAD_NODE:
             if params.slurm_configurations:

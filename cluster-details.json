@@ -1,0 +1,80 @@
+{
+    "ClusterArn": "arn:aws:sagemaker:us-east-2:767397879909:cluster/o65elfb3dsuk",
+    "ClusterName": "ci-lcs-test-16130712288",
+    "ClusterStatus": "Creating",
+    "CreationTime": "2025-07-07T19:21:28.248000-05:00",
+    "InstanceGroups": [
+        {
+            "CurrentCount": 0,
+            "TargetCount": 1,
+            "InstanceGroupName": "controller-machine",
+            "InstanceType": "ml.m5.12xlarge",
+            "LifeCycleConfig": {
+                "SourceS3Uri": "s3://sagemaker-lifecycle-f51f8cc0/src",
+                "OnCreate": "on_create.sh"
+            },
+            "ExecutionRole": "arn:aws:iam::767397879909:role/sagemaker-hyperpod-lcs-ci-AmazonSagemakerClusterExe-p7nE8UsAAzCo",
+            "ThreadsPerCore": 2,
+            "InstanceStorageConfigs": [
+                {
+                    "EbsVolumeConfig": {
+                        "VolumeSizeInGB": 500
+                    }
+                }
+            ],
+            "Status": "Creating",
+            "TrainingPlanStatus": "NotApplicable"
+        },
+        {
+            "CurrentCount": 0,
+            "TargetCount": 3,
+            "InstanceGroupName": "worker-group-1",
+            "InstanceType": "ml.c5.4xlarge",
+            "LifeCycleConfig": {
+                "SourceS3Uri": "s3://sagemaker-lifecycle-f51f8cc0/src",
+                "OnCreate": "on_create.sh"
+            },
+            "ExecutionRole": "arn:aws:iam::767397879909:role/sagemaker-hyperpod-lcs-ci-AmazonSagemakerClusterExe-p7nE8UsAAzCo",
+            "ThreadsPerCore": 1,
+            "InstanceStorageConfigs": [
+                {
+                    "EbsVolumeConfig": {
+                        "VolumeSizeInGB": 500
+                    }
+                }
+            ],
+            "Status": "Creating",
+            "TrainingPlanStatus": "NotApplicable"
+        },
+        {
+            "CurrentCount": 0,
+            "TargetCount": 1,
+            "InstanceGroupName": "worker-group-2",
+            "InstanceType": "ml.c5.4xlarge",
+            "LifeCycleConfig": {
+                "SourceS3Uri": "s3://sagemaker-lifecycle-f51f8cc0/src",
+                "OnCreate": "on_create.sh"
+            },
+            "ExecutionRole": "arn:aws:iam::767397879909:role/sagemaker-hyperpod-lcs-ci-AmazonSagemakerClusterExe-p7nE8UsAAzCo",
+            "ThreadsPerCore": 1,
+            "InstanceStorageConfigs": [
+                {
+                    "EbsVolumeConfig": {
+                        "VolumeSizeInGB": 500
+                    }
+                }
+            ],
+            "Status": "Creating",
+            "TrainingPlanStatus": "NotApplicable"
+        }
+    ],
+    "VpcConfig": {
+        "SecurityGroupIds": [
+            "sg-009539eb03813027b"
+        ],
+        "Subnets": [
+            "subnet-0b17bd87499d2476a"
+        ]
+    },
+    "NodeRecovery": "Automatic"
+}

@@ -1,0 +1,24 @@
+---
+- name: Ensure pip for Python 3 is installed
+  apt:
+    name: python3-pip
+    state: present
+
+- name: Install Ansible via pip
+  pip:
+    name: "ansible==10.7.0"
+    executable: pip3
+
+- name: Install ansible.posix collection
+  ansible.builtin.command: ansible-galaxy collection install ansible.posix
+  args:
+    creates: ~/.ansible/collections/ansible_collections/ansible/posix
+
+- name: Show Ansible version
+  ansible.builtin.command: ansible --version
+  register: ansible_version_output
+  changed_when: false
+
+- name: Print Ansible version
+  debug:
+    var: ansible_version_output.stdout_lines
