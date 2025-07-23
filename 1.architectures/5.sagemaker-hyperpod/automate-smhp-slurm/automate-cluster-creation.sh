@@ -159,7 +159,7 @@ check_git() {
 }
 
 clone_adt() {
-    REPO_NAME="awsome-distributed-training"
+    REPO_NAME="awsome-distributed-training-lcs-revamp"
     if [ -d "$REPO_NAME" ]; then
         echo -e "${YELLOW}⚠️  The directory '$REPO_NAME' already exists.${NC}"
         REMOVE_AND_CLONE=$(get_input "Do you want to remove it and clone again? (yes/no)" "no" "remove_and_clone")
@@ -217,7 +217,7 @@ multi_headnode() {
 
             echo -e "${YELLOW}The following CloudFormation command will be executed:${NC}"
             echo -e "${GREEN}aws cloudformation deploy --region $AWS_REGION \\
-                --template-file awsome-distributed-training/1.architectures/5.sagemaker-hyperpod/sagemaker-hyperpod-slurm-multi-headnode.yaml \\
+                --template-file awsome-distributed-training-lcs-revamp/1.architectures/5.sagemaker-hyperpod/sagemaker-hyperpod-slurm-multi-headnode.yaml \\
                 --stack-name ${MULTI_HEAD_SLURM_STACK} \\
                 --parameter-overrides \\
                     SlurmDBSecurityGroupId=${SECURITY_GROUP} \\
@@ -236,7 +236,7 @@ multi_headnode() {
 
             # Deploy the multi-head CF stack
             aws cloudformation deploy --region $AWS_REGION \
-                --template-file awsome-distributed-training/1.architectures/5.sagemaker-hyperpod/sagemaker-hyperpod-slurm-multi-headnode.yaml \
+                --template-file awsome-distributed-training-lcs-revamp/1.architectures/5.sagemaker-hyperpod/sagemaker-hyperpod-slurm-multi-headnode.yaml \
                 --stack-name ${MULTI_HEAD_SLURM_STACK} \
                 --parameter-overrides \
                     SlurmDBSecurityGroupId=${SECURITY_GROUP} \
@@ -288,7 +288,7 @@ multi_headnode() {
         create_and_attach_policy() {
             aws iam create-policy \
                 --policy-name AmazonSageMakerExecutionPolicy \
-                --policy-document file://awsome-distributed-training/1.architectures/5.sagemaker-hyperpod/1.AmazonSageMakerClustersExecutionRolePolicy.json --output json && \
+                --policy-document file://awsome-distributed-training-lcs-revamp/1.architectures/5.sagemaker-hyperpod/1.AmazonSageMakerClustersExecutionRolePolicy.json --output json && \
             aws iam attach-role-policy \
                 --role-name $SLURM_EXECUTION_ROLE \
                 --policy-arn arn:aws:iam::${AWS_ACCOUNT_ID}:policy/AmazonSageMakerExecutionPolicy
@@ -302,13 +302,13 @@ multi_headnode() {
             
             if [[ $error_output == *"EntityAlreadyExists"* ]]; then
                 echo -e "\n${YELLOW}If the error you received is that the policy already exists, you can either:${NC}" 
-                echo -e "\n${GREEN}     1. Continue the script with the existing policy (make sure the permissions match the ones in https://github.com/aws-samples/awsome-distributed-training/blob/main/1.architectures/5.sagemaker-hyperpod/1.AmazonSageMakerClustersExecutionRolePolicy.json) and manually attach it to your role ${SLURM_EXECUTION_ROLE}, or${NC}" 
+                echo -e "\n${GREEN}     1. Continue the script with the existing policy (make sure the permissions match the ones in https://github.com/aws-samples/awsome-distributed-training-lcs-revamp/blob/main/1.architectures/5.sagemaker-hyperpod/1.AmazonSageMakerClustersExecutionRolePolicy.json) and manually attach it to your role ${SLURM_EXECUTION_ROLE}, or${NC}" 
                 echo -e "\n${GREEN}     2. You can create a new policy with a name different than 'AmazonSageMakerExecutionPolicy' manually and attach it to your 'AmazonSageMakerExecutionRole' with the following command. Once you do that, you can continue with the rest of the script:${NC}"
 
                 echo -e "\n${YELLOW} Creating an IAM policy (required for option 2 above)${NC}"
                 echo -e "\n${BLUE}         aws iam create-policy \\
                     --policy-name <NEW POLICY NAME> \\
-                    --policy-document file://awsome-distributed-training/1.architectures/5.sagemaker-hyperpod/1.AmazonSageMakerClustersExecutionRolePolicy.json${NC}"
+                    --policy-document file://awsome-distributed-training-lcs-revamp/1.architectures/5.sagemaker-hyperpod/1.AmazonSageMakerClustersExecutionRolePolicy.json${NC}"
 
                 echo -e "\n${YELLOW} Attach an IAM policy to an IAM role (required for options 1 & 2 above)${NC}"
                 echo -e "\n${BLUE}         aws iam attach-role-policy \\
@@ -353,7 +353,7 @@ multi_headnode() {
 # Function to setup environment variables
 setup_env_vars() {
     echo -e "${BLUE}=== Setting Up Environment Variables ===${NC}"
-    echo -e "${GREEN}Cloning awsome-distributed-training${NC}"
+    echo -e "${GREEN}Cloning awsome-distributed-training-lcs-revamp${NC}"
     clone_adt
     
     export STACK_ID_VPC=$(get_input "Enter the name of the SageMaker VPC CloudFormation stack that was deployed as a prerequisite" "sagemaker-hyperpod" "stack_id_vpc")
@@ -423,7 +423,7 @@ setup_env_vars() {
 setup_lifecycle_scripts() {
     echo -e "${BLUE}=== Setting Up Lifecycle Scripts ===${NC}"
 
-    cd awsome-distributed-training/1.architectures/5.sagemaker-hyperpod/LifecycleScripts/
+    cd awsome-distributed-training-lcs-revamp/1.architectures/5.sagemaker-hyperpod/LifecycleScripts/
 
     USING_NEURON=$(get_input "Are you using Neuron-based instances (Trainium/Inferentia)? (yes/no)" "no" "using_neuron")
 
