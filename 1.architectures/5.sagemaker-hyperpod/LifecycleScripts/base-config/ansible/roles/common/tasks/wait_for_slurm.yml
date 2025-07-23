@@ -78,10 +78,10 @@
             except subprocess.CalledProcessError:
                 pass
 
-            print(f'Waiting for output. Retrying in {sleep} seconds...')
+            print('Waiting for output. Retrying in {} seconds...'.format(sleep, file=sys.stderr))
             time.sleep(sleep)
 
-        print(f'Exceeded maximum wait time of {timeout} seconds. No output from scontrol.')
+        print('Exceeded maximum wait time of {} seconds. No output from scontrol.'.format(timeout, file=sys.stderr))
         sys.exit(1)
 
     wait_for_scontrol()

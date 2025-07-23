@@ -39,7 +39,7 @@
 
 - name: Find instance group by address
   ansible.builtin.set_fact:
-    node_group: >-
+    node_group_raw: >-
       {% for group in resource_config.InstanceGroups %}
         {% for instance in group.Instances | default([]) %}
           {% if instance.get('CustomerIpAddress') == self_ip %}
@@ -47,6 +47,10 @@
           {% endif %}
         {% endfor %}
       {% endfor %}
+
+- name: Set trimmed node group
+  ansible.builtin.set_fact:
+    node_group: "{{ node_group_raw | trim }}"
 
 - name: Get controller node IPs
   ansible.builtin.set_fact:
@@ -58,7 +62,7 @@
 
 - name: Set node role (login/controller/compute)
   ansible.builtin.set_fact:
-    node_role: >-
+    node_role_raw: >-
       {% if provisioning.controller_group is defined and node_group == provisioning.controller_group %}
         controller
       {% elif provisioning.login_group is defined and node_group == provisioning.login_group %}
@@ -66,6 +70,10 @@
       {% else %}
         compute
       {% endif %}
+
+- name: Set trimmed node role 
+  ansible.builtin.set_fact:
+    node_role: "{{ node_role_raw | trim }}"
 
 - name: Failover if instance not found in resource config file
   ansible.builtin.fail:
