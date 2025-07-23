@@ -4,12 +4,18 @@
     path: "{{ slurm_conf_path | default('/opt/slurm/etc/slurm.conf') }}"
   register: slurm_conf_stat
 
+- name: Read slurm.conf content for debugging
+  ansible.builtin.slurp:
+    src: "{{ slurm_conf_path | default('/opt/slurm/etc/slurm.conf') }}"
+  register: slurm_conf_content
+  when: slurm_conf_stat.stat.exists
+
 - name: Wait for slurm.conf to contain controller IPs
   ansible.builtin.shell: "grep -q '{{ item }}' {{ slurm_conf_path | default('/opt/slurm/etc/slurm.conf') }}"
   register: slurm_conf_check
   until: slurm_conf_check.rc == 0
   retries: 12
-  delay: 5
+  delay: 10
   with_items: "{{ controller_ips }}"
   when: slurm_conf_stat.stat.exists
   ignore_errors: true
