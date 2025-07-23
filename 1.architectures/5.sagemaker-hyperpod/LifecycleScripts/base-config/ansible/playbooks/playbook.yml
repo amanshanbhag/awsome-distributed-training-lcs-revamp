@@ -11,7 +11,44 @@
       apt: 
         update_cache: yes
       changed_when: false
-  
+    
+    - name: Load provisioning parameters
+      ansible.builtin.include_vars:
+        file: "{{ playbook_dir }}/../vars/provisioning_parameters.json"
+        name: provisioning
+
+    - name: Load resource config
+      ansible.builtin.include_vars:
+        file: /opt/ml/config/resource_config.json
+        name: resource_config
+    
+    - name: Load config.py as a Python module
+      ansible.builtin.shell: |
+        python3 -c "
+        import sys
+        sys.path.append('{{ playbook_dir }}/../../')
+        from config import Config
+        
+        print('enable_docker_enroot_pyxis=' + str(Config.enable_docker_enroot_pyxis).lower())
+        print('enable_observability=' + str(Config.enable_observability).lower())
+        print('enable_pam_slurm_adopt=' + str(Config.enable_pam_slurm_adopt).lower())
+        print('enable_update_neuron_sdk=' + str(Config.enable_update_neuron_sdk).lower())
+        print('enable_sssd=' + str(Config.enable_sssd).lower())
+        print('enable_mount_s3=' + str(Config.enable_mount_s3).lower())
+        print('enable_fsx_openzfs=' + str(Config.enable_fsx_openzfs).lower())
+        print('s3_bucket=' + str(Config.s3_bucket))
+        "
+      register: config_output
+      changed_when: false
+    
+    - name: Parse config output
+      ansible.builtin.set_fact:
+        config: "{{ dict(config_output.stdout_lines | map('split', '=') | list) }}"
+      
+    - name: Debug config values
+      ansible.builtin.debug:  
+        var: config
+
   roles:
     - role: common
     - role: install_packages

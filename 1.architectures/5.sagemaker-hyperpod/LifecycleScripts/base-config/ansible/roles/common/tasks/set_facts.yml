@@ -1,14 +1,4 @@
 ---
-- name: Load provisioning parameters
-  ansible.builtin.include_vars:
-    file: "{{ playbook_dir }}/../vars/provisioning_parameters.json"
-    name: provisioning
-
-- name: Load resource config
-  ansible.builtin.include_vars:
-    file: /opt/ml/config/resource_config.json
-    name: resource_config
-
 # Migrate from Python to C
 - name: Get current IP address with retries
   ansible.builtin.shell: |
