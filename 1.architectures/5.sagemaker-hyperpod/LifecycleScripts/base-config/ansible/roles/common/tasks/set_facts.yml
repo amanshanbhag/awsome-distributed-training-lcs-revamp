@@ -15,6 +15,7 @@
     python3 -c "
     import socket
     import time
+    import sys
     max_retries = 7
     retry_delay_seconds = 5
     IP = '127.0.0.1'
@@ -26,14 +27,14 @@
           IP = s.getsockname()[0]
           break
         except Exception as e:
-          print(f"Failed to get IP address of the current host. Reason: {repr(e)}.")            
+          print('Failed to get IP address of the current host. Reason: {}'.format(repr(e)), file=sys.stderr)
           retry_count += 1
           if retry_count < max_retries:
-            print(f"Retrying in {retry_delay_seconds} seconds...")
+            print('Retrying in {} seconds...'.format(retry_delay_seconds), file=sys.stderr)
             time.sleep(retry_delay_seconds)
             retry_delay_seconds *= 2
           else:
-            print(f"Max retries reached. Giving up.")
+            print('Max retries reached. Giving up.', file=sys.stderr)
             raise
         finally:
           s.close()
