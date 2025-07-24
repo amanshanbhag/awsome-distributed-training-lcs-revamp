@@ -6,7 +6,7 @@
 
 - name: Install Ansible via pip
   pip:
-    name: "ansible==10.7.0"
+    name: "ansible=={{ ansible_version }}"
     executable: pip3
 
 - name: Install ansible.posix collection

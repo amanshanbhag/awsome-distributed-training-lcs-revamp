@@ -5,3 +5,7 @@
 - name: Wait for Slurm configuration
   include_tasks: wait_for_slurm.yml
   when: workload_manager == "slurm"
+
+- name: Wait for scontrol (Controller)
+  include_tasks: wait_for_scontrol.yml
+  when: workload_manager == "slurm"

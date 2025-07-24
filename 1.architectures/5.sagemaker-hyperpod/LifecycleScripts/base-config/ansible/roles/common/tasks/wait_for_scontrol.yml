@@ -1,0 +1,51 @@
+---
+- name: Controller Node(s) - Wait for scontrol
+  ansible.builtin.shell: |
+    python3 -c "
+    import subprocess
+    import time
+    import sys
+
+    def wait_for_scontrol():
+        timeout = 120
+        sleep = 5
+        for i in range(timeout // sleep):
+            try:
+                output = subprocess.check_output(['scontrol', 'show', 'nodes'])
+                if output.strip():
+                    print('Nodes registered with Slurm, Proceeding with install scripts.')
+                    sys.exit(0)
+            except subprocess.CalledProcessError:
+                pass
+
+            print('Waiting for output. Retrying in {} seconds...'.format(sleep, file=sys.stderr))
+            time.sleep(sleep)
+
+        print('Exceeded maximum wait time of {} seconds. No output from scontrol.'.format(timeout, file=sys.stderr))
+        sys.exit(1)
+
+    wait_for_scontrol()
+    "
+  register: scontrol_check
+  when: >
+    workload_manager == "slurm" and 
+    node_role == 'controller' and 
+    config.enable_observability | bool
+  ignore_errors: true
+  changed_when: false
+
+- name: Set scontrol_ready fact 
+  ansible.builtin.set_fact:
+    scontrol_ready: "{{ scontrol_check is defined and scontrol_check.rc == 0 }}"
+  when: >
+    workload_manager == "slurm" and 
+    node_role == 'controller' and 
+    config.enable_observability | bool 
+
+- name: Debug scontrol status
+  ansible.builtin.debug:
+    msg: "scontrol check {{ 'passed' if scontrol_ready | default(false) else 'failed' }}"
+  when: >
+    workload_manager == "slurm" and
+    node_role == "controller" and
+    config.enable_observability | bool

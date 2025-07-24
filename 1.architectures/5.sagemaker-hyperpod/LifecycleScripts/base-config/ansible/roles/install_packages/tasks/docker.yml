@@ -1,0 +1,154 @@
+---
+- name: Check if Docker is already installed
+  ansible.builtin.command: which docker
+  register: docker_check
+  failed_when: false
+  changed_when: false
+
+- name: Install Docker
+  when: docker_check.rc != 0
+  block:
+    - name: Log Docker installation start
+      ansible.builtin.debug:
+        msg: |
+          ###################################
+          # BEGIN: install docker
+          ###################################
+    
+    - name: Add Docker GPG key
+      apt_key:
+        url: https://download.docker.com/linux/ubuntu/gpg
+        state: present
+
+    - name: Add Docker repository to apt
+      apt_repository:
+        repo: "deb [arch={{ ansible_architecture }}] https://download.docker.com/linux/ubuntu {{ ansible_distribution_release }} stable"
+        state: present
+        update_cache: true
+    
+    - name: Install Docker
+      apt:
+        name: "{{ item }}"
+        state: present
+      loop:
+        - docker-ce
+        - docker-ce-cli
+        - containerd.io
+        - docker-buildx-plugin
+        - docker-compose-plugin
+
+    - name: Check if docker service is active
+      service: 
+        name: docker
+        state: started
+        enabled: true
+    
+    - name: Ensure group docker exists
+      ansible.builtin.group:
+        name: docker
+        state: present
+
+    - name: Set permissions on Docker binary
+      ansible.builtin.shell: |
+        chgrp docker $(which docker)
+        chmod g+s $(which docker)
+      changed_when: true
+
+    - name: Add user ubuntu to docker group
+      ansible.builtin.user:
+        name: ubuntu
+        groups: docker
+        append: true
+
+    - name: Add NVIDIA container toolkit repository key        
+      apt_key:
+        url: https://nvidia.github.io/libnvidia-container/gpgkey 
+        state: present
+    
+    - name: Add NVIDIA container toolkit apt repository 
+      apt_repository:
+        repo: "https://nvidia.github.io/libnvidia-container/stable/deb/nvidia-container-toolkit.list"
+        state: present
+        update_cache: true
+    
+    - name: Install NVIDIA container toolkit
+      apt:
+        name: "{{ item }}"
+        state: present
+        dpkg_options: "lock-timeout=120 --allow-downgrades"
+      loop:
+        - nvidia-container-toolkit={{ nvidia_container_tlk_version }}
+        - nvidia-container-toolkit-base={{ nvidia_container_tlk_version }}
+        - libnvidia-container-tools={{ nvidia_container_tlk_version }}
+        - libnvidia-container1={{ nvidia_container_tlk_version }}
+
+    - name: Hold nvidia-container-toolkit version(s)
+      ansible.builtin.dpkg_selections:
+        name: "{{ item }}"
+        selection: hold
+      loop:
+        - nvidia-container-toolkit 
+        - nvidia-container-toolkit-base 
+        - libnvidia-container-tools 
+        - libnvidia-container1      
+    
+    - name: Print NVIDIA container toolkit version
+      ansible.builtin.debug:
+        msg: |
+          Expected NV_TLK_VERSION: {{ nvidia_container_tlk_version }}
+          Installed NV_TLK_VERSION: {{ lookup('pipe', "dpkg -l nvidia-container-toolkit | awk '/nvidia-container-toolkit/ {print $3}'") }}
+
+    - name: Check for /opt/sagemaker mount
+      ansible.builtin.stat:
+        path: /opt/sagemaker
+        get_attributes: true
+      register: sagemaker_stat
+    
+    - name: Check for /opt/dlami/nvme mount
+      ansible.builtin.stat:
+        path: /opt/dlami/nvme
+        get_attributes: true
+      register: dlami_nvme_stat
+    
+    - name: Configure Docker for /opt/dlami/nvme
+      when: dlami_nvme_stat.stat.exists and dlami_nvme_stat.stat.ismount
+      block:
+        - name: Create Docker daemon.json for /opt/dlami/nvme
+          ansible.builtin.copy:
+            dest: /etc/docker/daemon.json
+            content: |
+              {
+                  "data-root": "/opt/dlami/nvme/docker/data-root"
+              }
+    
+        - name: Update Docker service for /opt/dlami/nvme
+          ansible.builtin.lineinfile:
+            path: /usr/lib/systemd/system/docker.service
+            regexp: '^(\[Service\])$'
+            line: '[Service]\nEnvironment="DOCKER_TMPDIR=/opt/dlami/nvme/docker/tmp"'
+            backrefs: yes
+
+    - name: Configure Docker for /opt/sagemaker
+      when: sagemaker_stat.stat.exists and sagemaker_stat.stat.ismount and not (dlami_nvme_stat.stat.exists and dlami_nvme_stat.stat.ismount)
+      block:
+        - name: Create Docker daemon.json for /opt/sagemaker
+          ansible.builtin.copy:
+            dest: /etc/docker/daemon.json
+            content: |
+              {
+                  "data-root": "/opt/sagemaker/docker/data-root"
+              }
+
+        - name: Update Docker service for /opt/sagemaker
+          ansible.builtin.lineinfile:
+            path: /usr/lib/systemd/system/docker.service
+            regexp: '^(\[Service\])$'
+            line: '[Service]\nEnvironment="DOCKER_TMPDIR=/opt/sagemaker/docker/tmp"'
+            backrefs: yes
+
+    - name: Reload systemd and restart Docker
+      ansible.builtin.systemd:
+        daemon_reload: yes
+        name: docker
+        state: restarted
+

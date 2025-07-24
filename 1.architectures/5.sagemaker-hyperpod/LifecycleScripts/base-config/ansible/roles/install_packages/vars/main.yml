@@ -1,0 +1,3 @@
+---
+nvidia_container_tlk_version: "1.17.6-1"
+ansible_version: "10.7.0"

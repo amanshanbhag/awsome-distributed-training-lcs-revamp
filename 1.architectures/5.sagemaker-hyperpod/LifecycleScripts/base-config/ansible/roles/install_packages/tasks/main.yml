@@ -17,3 +17,72 @@
 
 - name: Include Ansible installation task
   include_tasks: ansible.yml
+
+- name: Include Docker installation task for observability (Compute Node)
+  include_tasks: docker.yml
+  when: >
+    workload_manager == "slurm" and 
+    config.enable_observability | bool and 
+    node_role == "compute"
+
+- name: Include Docker installation task for observability (Controller Node)
+  include_tasks: docker.yml
+  when: >
+    workload_manager == "slurm" and 
+    config.enable_observability | bool and 
+    node_role == "controller" and 
+    scontrol_ready | default(false) | bool
+
+- name: Include Docker installation task for Docker/Enroot/Pyxis (All Nodes)
+  include_tasks: docker.yml
+  when: >
+    workload_manager == "slurm" and 
+    config.enable_docker_enroot_pyxis | bool
+
+# - name: Include Enroot/Pyxis installation task (Controller Nodes)
+#   include_tasks: enroot_pyxis.yml
+#   when: >
+#     workload_manager == "slurm" and
+#     config.enable_docker_enroot_pyxis | bool and 
+#     node_role == "controller"
+
+# - name: Restart slurmctld on Controller Nodes
+#   ansible.builtin.systemd:
+#     name: slurmctld
+#     state: restarted
+#   when: >
+#     workload_manager == "slurm" and
+#     config.enable_docker_enroot_pyxis | bool and 
+#     node_role == "controller"
+
+# - name: Wait for controller nodes to complete Enroot/Pyxis installation 
+#   ansible.builtin.pause:
+#     seconds: 30
+#   when: >
+#     workload_manager == "slurm" and
+#     config.enable_docker_enroot_pyxis | bool and 
+#     node_role != "controller" 
+
+# - name: Include Enroot/Pyxis installation task (Compute/Login Nodes)
+#   include_tasks: enroot_pyxis.yml
+#   when: >
+#     workload_manager == "slurm" and
+#     config.enable_docker_enroot_pyxis | bool and 
+#     node_role != "controller"
+
+# - name: Restart slurmd on Compute Nodes
+#   ansible.builtin.systemd:
+#     name: slurmd
+#     state: restarted
+#   when: >
+#     workload_manager == "slurm" and
+#     config.enable_docker_enroot_pyxis | bool and 
+#     node_role == "compute"
+
+# - name: Include Neuron SDK update task
+#   include_tasks: neuron_sdk.yml
+#   when: >
+#     workload_manager == "slurm" and
+#     config.enable_update_neuron_sdk | bool and
+#     node_role == "compute"
+
