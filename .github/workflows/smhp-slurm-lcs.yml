@@ -298,7 +298,7 @@ jobs:
             "stack_id_vpc": "sagemaker-hyperpod-lcs-cicd",
             "multi_headnode": "no",
             "using_neuron": "no",
-            "deployed_observability": "no",
+            "deployed_observability": "yes",
             "controller_name": "controller-machine",
             "controller_type": "$CONTROLLER_TYPE",
             "add_login_group": "no",
