@@ -58,6 +58,9 @@
      slurm_conf_check.results is defined and slurm_conf_check.results | selectattr('rc', 'equalto', 0) | list | length > 0) or
     (node_role != 'controller' and worker_slurm_conf_stat.stat is defined and worker_slurm_conf_stat.stat.exists)
 
+- name: Debug config values for troubleshooting
+  ansible.builtin.debug:
+    msg: "workload_manager: {{ workload_manager }}, node_role: {{ node_role }}, enable_observability: {{ config.enable_observability }}"
 
 - name: Controller Node(s) - Wait for scontrol
   ansible.builtin.shell: |
