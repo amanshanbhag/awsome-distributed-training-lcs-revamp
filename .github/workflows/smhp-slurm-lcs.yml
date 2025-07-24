@@ -395,5 +395,21 @@ jobs:
           CLUSTER_NAME="${{ env.CLUSTER_NAME }}"
           echo "Deleting cluster: $CLUSTER_NAME"
           
+          # Check if cluster is in RollingBack state and wait
+          MAX_ROLLBACK_ATTEMPTS=25
+          ROLLBACK_ATTEMPT=0
+
+          while [ $ROLLBACK_ATTEMPT -lt $MAX_ROLLBACK_ATTEMPTS ]; do
+            STATUS=$(aws sagemaker describe-cluster --cluster-name "$CLUSTER_NAME" --query 'ClusterStatus' --output text 2>/dev/null || echo "NotFound")
+
+            if [ "$STATUS" = "RollingBack" ] ; then
+              echo "Cluster is in RollingBack state, waiting... (attempt $((ROLLBACK_ATTEMPT+1))/$MAX_ROLLBACK_ATTEMPTS)"
+              sleep 30
+              ROLLBACK_ATTEMPT=$((ROLLBACK_ATTEMPT+1))
+            else
+              break
+            fi
+          done
+
           aws sagemaker delete-cluster --cluster-name "$CLUSTER_NAME"
           echo "Cluster deletion initiated"
