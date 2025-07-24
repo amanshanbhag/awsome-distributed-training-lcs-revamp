@@ -227,7 +227,7 @@ jobs:
     runs-on: self-hosted
     timeout-minutes: 40
     concurrency:
-      group: ${{ github.workflow }}-lcs-test
+      group: ${{ github.workflow }}-lcs-test-${{ github.run_id }}
       cancel-in-progress: false
     
     steps:
@@ -361,7 +361,7 @@ jobs:
             if [ "$STATUS" = "InService" ]; then
               echo "Cluster is now in service!"
               break
-            elif [ "$STATUS" = "Failed" ]; then
+            elif [ "$STATUS" = "Failed" ] || [ "$STATUS" = "RollingBack" ]; then
               echo "::error::Cluster creation failed"
               FAILURE_REASON=$(aws sagemaker describe-cluster --cluster-name "$CLUSTER_NAME" --query 'FailureMessage' --output text)
               echo "::error::Failure reason: $FAILURE_REASON"
