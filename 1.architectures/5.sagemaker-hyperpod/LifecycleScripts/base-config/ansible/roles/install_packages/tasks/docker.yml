@@ -72,9 +72,9 @@
     #   args:
     #     creates: /etc/apt/sources.list.d/docker.list
 
-    - name: Update apt cache after adding repository
-      apt:
-        update_cache: true
+    # - name: Update apt cache after adding repository
+    #   apt:
+    #     update_cache: true
             
     - name: Install Docker
       apt:
@@ -110,15 +110,21 @@
         groups: docker
         append: true
 
-    - name: Add NVIDIA container toolkit repository key using shell and dearmor it
-      ansible.builtin.shell: |
-        curl -fsSL https://nvidia.github.io/libnvidia-container/gpgkey | gpg --yes --dearmor -o /usr/share/keyrings/nvidia-container-toolkit-keyring.gpg
-      args:
-        creates: /usr/share/keyrings/nvidia-container-toolkit-keyring.gpg
+    # - name: Add NVIDIA container toolkit repository key using shell and dearmor it
+    #   ansible.builtin.shell: |
+    #     curl -fsSL https://nvidia.github.io/libnvidia-container/gpgkey | gpg --yes --dearmor -o /usr/share/keyrings/nvidia-container-toolkit-keyring.gpg
+    #   args:
+    #     creates: /usr/share/keyrings/nvidia-container-toolkit-keyring.gpg
+
+    - name: Add NVIDIA container toolkit repository key
+      apt_key:
+        url: https://nvidia.github.io/libnvidia-container/gpgkey
+        state: present
+        keyring: /usr/share/keyrings/nvidia-container-toolkit-keyring.gpg
    
     - name: Add NVIDIA container toolkit apt repository 
       apt_repository:
-        repo: "deb [signed-by=/usr/share/keyrings/nvidia-container-toolkit-keyring.gpg] https://nvidia.github.io/libnvidia-container/stable/deb/{{ ansible_architecture }} /"
+        repo: "deb [signed-by=/usr/share/keyrings/nvidia-container-toolkit-keyring.gpg] https://nvidia.github.io/libnvidia-container/stable/deb/{{ normalized_architecture }} /"
         state: present
         update_cache: true
     
