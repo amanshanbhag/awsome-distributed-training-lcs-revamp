@@ -37,90 +37,18 @@
         state: directory
         mode: '0755'
 
-    # - name: Add Docker GPG key
-    #   apt_key:
-    #     url: https://download.docker.com/linux/ubuntu/gpg
-    #     state: present
-    #     keyring: /etc/apt/keyrings/docker.gpg
-
-    - name: Add Docker GPG key using shell (matching bash script)
+    - name: Add Docker GPG key using shell and dearmor it
       ansible.builtin.shell: |
         curl -fsSL https://download.docker.com/linux/ubuntu/gpg | gpg --dearmor -o /etc/apt/keyrings/docker.gpg
       args:
         creates: /etc/apt/keyrings/docker.gpg
 
-    # - name: Add Docker repository to apt
-    #   apt_repository:
-    #     repo: "deb [arch={{ ansible_architecture }} signed-by=/etc/apt/keyrings/docker.gpg] https://download.docker.com/linux/ubuntu {{ ansible_distribution_release }} stable"
-    #     state: present
-    
-    - name: Add Docker repository using shell (matching bash script)
-      ansible.builtin.shell: |
-        echo "deb [arch=$(dpkg --print-architecture) signed-by=/etc/apt/keyrings/docker.gpg] https://download.docker.com/linux/ubuntu $(lsb_release -cs) stable" | tee /etc/apt/sources.list.d/docker.list > /dev/null
-      args:
-        creates: /etc/apt/sources.list.d/docker.list
-
-    - name: Explicitly update cache to add docker packages
-      apt:
+    - name: Add Docker repository to apt
+      apt_repository:
+        repo: "deb [arch={{ ansible_architecture }} signed-by=/etc/apt/keyrings/docker.gpg] https://download.docker.com/linux/ubuntu {{ ansible_distribution_release }} stable"
+        state: present
         update_cache: true
-
-    - name: Debug available Docker packages
-      ansible.builtin.shell: apt-cache search docker-ce
-      register: docker_packages_available
-      
-    - name: Show available Docker packages
-      ansible.builtin.debug:
-        var: docker_packages_available.stdout_lines
-
-    - name: Debug repository sources
-      ansible.builtin.shell: cat /etc/apt/sources.list.d/download_docker_com_linux_ubuntu.list
-      register: docker_repo_content
-      
-    - name: Show repository content
-      ansible.builtin.debug:
-        var: docker_repo_content.stdout_lines
-
-    - name: Check if repository URL is accessible
-      ansible.builtin.shell: curl -I https://download.docker.com/linux/ubuntu/dists/{{ ansible_distribution_release }}/stable/
-      register: docker_repo_check
-      
-    - name: Show repository accessibility
-      ansible.builtin.debug:
-        var: docker_repo_check.stdout_lines
-
-    - name: Check GPG key file exists
-      ansible.builtin.stat:
-        path: /etc/apt/keyrings/docker.gpg
-      register: gpg_key_stat
-
-    - name: Show GPG key status
-      ansible.builtin.debug:
-        var: gpg_key_stat
-
-    - name: Check apt update errors
-      ansible.builtin.shell: apt update 2>&1 | grep -i docker || true
-      register: apt_update_errors
-
-    - name: Show apt update errors
-      ansible.builtin.debug:
-        var: apt_update_errors.stdout_lines
-
-    - name: Try manual package listing
-      ansible.builtin.shell: apt-cache madison docker-ce || true
-      register: docker_madison
-
-    - name: Show manual package listing
-      ansible.builtin.debug:
-        var: docker_madison.stdout_lines
-
-    - name: List all available packages from Docker repository
-      ansible.builtin.shell: apt-cache policy | grep -A5 -B5 docker
-      register: docker_policy
-      
-    - name: Show Docker repository policy
-      ansible.builtin.debug:
-        var: docker_policy.stdout_lines
-        
+            
     - name: Install Docker
       apt:
         name: "{{ item }}"
@@ -155,12 +83,12 @@
         groups: docker
         append: true
 
-    - name: Add NVIDIA container toolkit repository key        
-      apt_key:
-        url: https://nvidia.github.io/libnvidia-container/gpgkey 
-        state: present
-        keyring: /usr/share/keyrings/nvidia-container-toolkit-keyring.gpg
-    
+    - name: Add NVIDIA container toolkit repository key using shell and dearmor it
+      ansible.builtin.shell: |
+        curl -fsSL https://nvidia.github.io/libnvidia-container/gpgkey | gpg --yes --dearmor -o /usr/share/keyrings/nvidia-container-toolkit-keyring.gpg
+      args:
+        creates: /usr/share/keyrings/nvidia-container-toolkit-keyring.gpg
+   
     - name: Add NVIDIA container toolkit apt repository 
       apt_repository:
         repo: "deb [signed-by=/usr/share/keyrings/nvidia-container-toolkit-keyring.gpg] https://nvidia.github.io/libnvidia-container/stable/deb/{{ ansible_architecture }} /"
