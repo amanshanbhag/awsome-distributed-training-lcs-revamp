@@ -141,17 +141,23 @@
       apt:
         update_cache: yes
 
-    - name: Install NVIDIA container toolkit
+    - name: Install NVIDIA container toolkit dependencies
       apt:
         name: "{{ item }}"
         state: present
         allow_downgrade: true
         dpkg_options: 'force-confold,force-confdef'
       loop:
-        - nvidia-container-toolkit={{ nvidia_container_tlk_version }}
         - nvidia-container-toolkit-base={{ nvidia_container_tlk_version }}
         - libnvidia-container-tools={{ nvidia_container_tlk_version }}
         - libnvidia-container1={{ nvidia_container_tlk_version }}
+
+    - name: Install NVIDIA container toolkit
+      apt:
+        name: nvidia-container-toolkit={{ nvidia_container_tlk_version }}
+        state: present
+        allow_downgrade: true
+        dpkg_options: 'force-confold,force-confdef'
 
     - name: Hold nvidia-container-toolkit version(s)
       ansible.builtin.dpkg_selections:
