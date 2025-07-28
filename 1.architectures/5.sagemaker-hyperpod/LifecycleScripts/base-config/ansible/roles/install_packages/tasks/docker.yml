@@ -76,6 +76,31 @@
       ansible.builtin.debug:
         var: docker_repo_check.stdout_lines
 
+    - name: Check GPG key file exists
+      ansible.builtin.stat:
+        path: /etc/apt/keyrings/docker.gpg
+      register: gpg_key_stat
+
+    - name: Show GPG key status
+      ansible.builtin.debug:
+        var: gpg_key_stat
+
+    - name: Check apt update errors
+      ansible.builtin.shell: apt update 2>&1 | grep -i docker || true
+      register: apt_update_errors
+
+    - name: Show apt update errors
+      ansible.builtin.debug:
+        var: apt_update_errors.stdout_lines
+
+    - name: Try manual package listing
+      ansible.builtin.shell: apt-cache madison docker-ce || true
+      register: docker_madison
+
+    - name: Show manual package listing
+      ansible.builtin.debug:
+        var: docker_madison.stdout_lines
+
     - name: List all available packages from Docker repository
       ansible.builtin.shell: apt-cache policy | grep -A5 -B5 docker
       register: docker_policy
