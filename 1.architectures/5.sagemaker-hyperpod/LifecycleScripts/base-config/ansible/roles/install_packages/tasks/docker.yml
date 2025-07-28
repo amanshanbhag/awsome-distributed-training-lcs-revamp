@@ -37,16 +37,16 @@
         state: directory
         mode: '0755'
 
-    # - name: Add Docker GPG key using shell and dearmor it
-    #   ansible.builtin.shell: |
-    #     curl -fsSL https://download.docker.com/linux/ubuntu/gpg | gpg --dearmor -o /etc/apt/keyrings/docker.gpg
-    #   args:
-    #     creates: /etc/apt/keyrings/docker.gpg
+    - name: Add Docker GPG key using shell and dearmor it
+      ansible.builtin.shell: |
+        curl -fsSL https://download.docker.com/linux/ubuntu/gpg | gpg --dearmor -o /etc/apt/keyrings/docker.gpg
+      args:
+        creates: /etc/apt/keyrings/docker.gpg
 
-    - name: TEST Add Docker GPG apt key
-      apt_key:
-        url: https://download.docker.com/linux/ubuntu/gpg
-        state: present
+    # - name: TEST Add Docker GPG apt key
+    #   apt_key:
+    #     url: https://download.docker.com/linux/ubuntu/gpg
+    #     state: present
 
     # - name: Add Docker repository to apt
     #   apt_repository:
