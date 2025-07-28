@@ -175,20 +175,8 @@
           Expected NV_TLK_VERSION: {{ nvidia_container_tlk_version }}
           Installed NV_TLK_VERSION: {{ lookup('pipe', "dpkg -l nvidia-container-toolkit | awk '/nvidia-container-toolkit/ {print $3}'") }}
 
-    - name: Check for /opt/sagemaker mount
-      ansible.builtin.stat:
-        path: /opt/sagemaker
-        get_attributes: true
-      register: sagemaker_stat
-    
-    - name: Check for /opt/dlami/nvme mount
-      ansible.builtin.stat:
-        path: /opt/dlami/nvme
-        get_attributes: true
-      register: dlami_nvme_stat
-    
     - name: Configure Docker for /opt/dlami/nvme
-      when: dlami_nvme_stat.stat.exists and dlami_nvme_stat.stat.ismount
+      when: ansible_mounts | selectattr('mount', 'equalto', '/opt/dlami/nvme') | list | length > 0
       block:
         - name: Create Docker daemon.json for /opt/dlami/nvme
           ansible.builtin.copy:
@@ -206,7 +194,9 @@
             backrefs: yes
 
     - name: Configure Docker for /opt/sagemaker
-      when: sagemaker_stat.stat.exists and sagemaker_stat.stat.ismount and not (dlami_nvme_stat.stat.exists and dlami_nvme_stat.stat.ismount)
+      when:
+        - ansible_mounts | selectattr('mount', 'equalto', '/opt/sagemaker') | list | length > 0
+        - ansible_mounts | selectattr('mount', 'equalto', '/opt/dlami/nvme') | list | length == 0
       block:
         - name: Create Docker daemon.json for /opt/sagemaker
           ansible.builtin.copy:
