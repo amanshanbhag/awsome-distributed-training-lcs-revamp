@@ -11,6 +11,16 @@
       apt: 
         update_cache: yes
       changed_when: false
+
+    - name: Set a normalized architecture variable
+      set_fact:
+        normalized_architecture: >-
+          {{
+            'amd64' if ansible_architecture == 'x86_64'
+            else 'arm64' if ansible_architecture == 'aarch64'
+            else ansible_architecture
+          }}
+
     
     - name: Load provisioning parameters
       ansible.builtin.include_vars:
