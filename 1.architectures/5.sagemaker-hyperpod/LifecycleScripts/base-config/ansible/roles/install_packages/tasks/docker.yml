@@ -60,6 +60,30 @@
       ansible.builtin.debug:
         var: docker_packages_available.stdout_lines
 
+    - name: Debug repository sources
+      ansible.builtin.shell: cat /etc/apt/sources.list.d/download_docker_com_linux_ubuntu.list
+      register: docker_repo_content
+      
+    - name: Show repository content
+      ansible.builtin.debug:
+        var: docker_repo_content.stdout_lines
+
+    - name: Check if repository URL is accessible
+      ansible.builtin.shell: curl -I https://download.docker.com/linux/ubuntu/dists/{{ ansible_distribution_release }}/stable/
+      register: docker_repo_check
+      
+    - name: Show repository accessibility
+      ansible.builtin.debug:
+        var: docker_repo_check.stdout_lines
+
+    - name: List all available packages from Docker repository
+      ansible.builtin.shell: apt-cache policy | grep -A5 -B5 docker
+      register: docker_policy
+      
+    - name: Show Docker repository policy
+      ansible.builtin.debug:
+        var: docker_policy.stdout_lines
+        
     - name: Install Docker
       apt:
         name: "{{ item }}"
