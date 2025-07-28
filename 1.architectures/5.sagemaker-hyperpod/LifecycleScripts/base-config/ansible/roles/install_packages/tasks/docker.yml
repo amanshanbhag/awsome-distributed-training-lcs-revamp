@@ -51,7 +51,15 @@
     - name: Explicitly update cache to add docker packages
       apt:
         update_cache: true
-    
+
+    - name: Debug available Docker packages
+      ansible.builtin.shell: apt-cache search docker-ce
+      register: docker_packages_available
+      
+    - name: Show available Docker packages
+      ansible.builtin.debug:
+        var: docker_packages_available.stdout_lines
+
     - name: Install Docker
       apt:
         name: "{{ item }}"
