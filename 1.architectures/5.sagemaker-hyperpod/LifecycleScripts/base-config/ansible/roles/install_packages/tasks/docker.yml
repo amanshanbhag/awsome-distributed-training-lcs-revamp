@@ -116,23 +116,37 @@
     #   args:
     #     creates: /usr/share/keyrings/nvidia-container-toolkit-keyring.gpg
 
-    - name: Add NVIDIA container toolkit repository key
-      apt_key:
-        url: https://nvidia.github.io/libnvidia-container/gpgkey
-        state: present
-        keyring: /usr/share/keyrings/nvidia-container-toolkit-keyring.gpg
+    # - name: Add NVIDIA container toolkit repository key
+    #   apt_key:
+    #     url: https://nvidia.github.io/libnvidia-container/gpgkey
+    #     state: present
+    #     keyring: /usr/share/keyrings/nvidia-container-toolkit-keyring.gpg
    
-    - name: Add NVIDIA container toolkit apt repository 
-      apt_repository:
-        repo: "deb [signed-by=/usr/share/keyrings/nvidia-container-toolkit-keyring.gpg] https://nvidia.github.io/libnvidia-container/stable/deb/{{ normalized_architecture }} /"
-        state: present
-        update_cache: true
-    
+    # - name: Add NVIDIA container toolkit apt repository 
+    #   apt_repository:
+    #     repo: "deb [signed-by=/usr/share/keyrings/nvidia-container-toolkit-keyring.gpg] https://nvidia.github.io/libnvidia-container/stable/deb/{{ normalized_architecture }} /"
+    #     state: present
+    #     update_cache: true
+
+    - name: Add NVIDIA container toolkit GPG key and repository using shell
+      ansible.builtin.shell: |
+        curl -fsSL https://nvidia.github.io/libnvidia-container/gpgkey | gpg --yes --dearmor -o /usr/share/keyrings/nvidia-container-toolkit-keyring.gpg && \
+        curl -s -L https://nvidia.github.io/libnvidia-container/stable/deb/nvidia-container-toolkit.list | \
+          sed 's#deb https://#deb [signed-by=/usr/share/keyrings/nvidia-container-toolkit-keyring.gpg] https://#g' | \
+          tee /etc/apt/sources.list.d/nvidia-container-toolkit.list
+      args:
+        creates: /usr/share/keyrings/nvidia-container-toolkit-keyring.gpg
+
+    - name: Update apt cache for NVIDIA packages
+      apt:
+        update_cache: yes
+
     - name: Install NVIDIA container toolkit
       apt:
         name: "{{ item }}"
         state: present
-        dpkg_options: "lock-timeout=120 --allow-downgrades"
+        allow_downgrade: true
+        dpkg_options: 'force-confold,force-confdef'
       loop:
         - nvidia-container-toolkit={{ nvidia_container_tlk_version }}
         - nvidia-container-toolkit-base={{ nvidia_container_tlk_version }}
