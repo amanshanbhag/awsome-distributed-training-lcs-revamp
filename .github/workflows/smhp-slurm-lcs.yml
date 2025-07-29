@@ -16,7 +16,7 @@ on:
 env:
   AWS_ACCOUNT_ID: ${{ secrets.AWS_ACCOUNT_ID }}
   AWS_REGION: "us-east-2"
-  CONTROLLER_TYPE: "ml.m5.12xlarge"
+  CONTROLLER_TYPE: "ml.m5.4xlarge"
   WORKER_GROUPS: "ml.c5.4xlarge,2;ml.g5.8xlarge,2"
 
 
