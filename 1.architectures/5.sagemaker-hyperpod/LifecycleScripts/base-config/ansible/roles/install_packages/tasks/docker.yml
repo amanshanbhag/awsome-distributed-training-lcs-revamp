@@ -80,12 +80,16 @@
       apt:
         name: "{{ item }}"
         state: present
+        dpkg_options: 'force-confold,force-confdef'
+        lock_timeout: 120
       loop:
         - docker-ce
         - docker-ce-cli
         - containerd.io
         - docker-buildx-plugin
         - docker-compose-plugin
+      retries: 5
+      delay: 5
 
     - name: Check if docker service is active
       service: 
@@ -151,6 +155,8 @@
         - nvidia-container-toolkit-base={{ nvidia_container_tlk_version }}
         - libnvidia-container-tools={{ nvidia_container_tlk_version }}
         - libnvidia-container1={{ nvidia_container_tlk_version }}
+      retries: 5
+      delay: 5
 
     - name: Install NVIDIA container toolkit
       apt:
@@ -158,6 +164,9 @@
         state: present
         allow_downgrade: true
         dpkg_options: 'force-confold,force-confdef'
+      retries: 5
+      delay: 5
+
 
     - name: Hold nvidia-container-toolkit version(s)
       ansible.builtin.dpkg_selections:

@@ -1,0 +1,212 @@
+---
+- name: Log Enroot and Pyxis installation start
+  ansible.builtin.debug:
+    msg: |
+      ###################################
+      # BEGIN: install enroot & pyxis
+      ###################################
+
+- name: Check if Slurm cgroup.conf exists
+  stat:
+    path: "{{ slurm_install_dir }}/etc/cgroup.conf"
+  register: ansible_stat_result
+
+- name: Configure Slurm cgroup.conf for GPU Mapping 
+  lineinfile:
+    path: "{{ slurm_install_dir }}/etc/cgroup.conf"
+    line: "ConstrainDevices=yes"
+    create: no
+  vars: 
+    ansible_stat: "{{ ansible_stat_result }}"
+  when: ansible_stat.stat.exists
+
+- name: Check if Slurm is installed
+  stat:
+    path: "{{ slurm_install_dir }}"
+  register: slurm_check
+
+- name: Fail if Slurm not found
+  fail:
+    msg: "Slurm installation not found. Skipping pyxis and enroot installation."
+  when: not slurm_check.stat.exists
+
+- name: Remove existing pyxis directory
+  file:
+    path: "{{ slurm_install_dir }}/pyxis"
+    state: absent 
+  ignore_errors: true
+
+- name: Create required directories
+  file: 
+    path: "{{ item }}"
+    state: directory
+    mode: '0755'
+  loop:
+    - "{{ slurm_install_dir }}/enroot"
+    - "{{ slurm_install_dir }}/pyxis"
+    - "{{ pyxis_tmp_dir }}"
+    - /run/pyxis
+    - /tmp/enroot/data
+    - /opt/enroot
+    - "{{ slurm_install_dir }}/etc/plugstack.conf.d"
+
+- name: Set permissions for enroot directories
+  file:
+    path: "{{ item }}"
+    mode: '0777'
+    recurse: yes
+  loop:
+    - /tmp/enroot
+    - /opt/enroot
+
+- name: Download enroot packages
+  get_url:
+    url: "https://github.com/NVIDIA/enroot/releases/download/v{{ enroot_version }}/{{ item }}"
+    dest: "{{ pyxis_tmp_dir }}/{{ item }}"
+    mode: '0644'
+  loop:
+    - "enroot_{{ enroot_version }}-1_{{ normalized_architecture }}.deb"
+    - "enroot+caps_{{ enroot_version }}-1_{{ normalized_architecture }}.deb"
+  retries: 5
+  delay: 5  
+
+- name: Install enroot packages
+  apt:
+    deb: "{{ pyxis_tmp_dir }}/{{ item }}"
+    dpkg_options: 'force-confold,force-confdef'
+    lock_timeout: 120
+    state: present
+  loop:
+    - "enroot_{{ enroot_version }}-1_{{ normalized_architecture }}.deb"
+    - "enroot+caps_{{ enroot_version }}-1_{{ normalized_architecture }}.deb"
+  retries: 5
+  delay: 5
+
+- name: Copy enroot configuration
+  copy:
+    src: "{{ role_dir }}/files/enroot.conf"
+    dest: /etc/enroot/enroot.conf
+    mode: '0644'
+
+- name: Clone pyxis repository
+  git:
+    repo: https://github.com/NVIDIA/pyxis.git
+    dest: "{{ slurm_install_dir }}/pyxis"
+    version: "{{ pyxis_version }}"
+    depth: 1
+    force: yes
+  retries: 5
+  delay: 5
+
+- name: Build pyxis
+  shell: |
+    cd "{{ slurm_install_dir }}/pyxis"
+    CPPFLAGS='-I {{ slurm_install_dir }}/include/' make -j {{ ansible_processor_vcpus }}
+    CPPFLAGS='-I {{ slurm_install_dir }}/include/' make install
+
+- name: Configure pyxis plugin
+  lineinfile:
+    path: "{{ slurm_install_dir }}/etc/plugstack.conf"
+    line: "include {{ slurm_install_dir }}/etc/plugstack.conf.d/pyxis.conf"
+    create: yes
+
+- name: Link pyxis configuration
+  file:
+    src: /usr/local/share/pyxis/pyxis.conf
+    dest: "{{ slurm_install_dir }}/etc/plugstack.conf.d/pyxis.conf"
+    state: link
+    force: yes
+
+- name: Wait for dlami-nvme service
+  shell: |
+    MAX_WAIT_TIME=120
+    ELAPSED_TIME=0
+    CHECK_INTERVAL=5
+    
+    while true; do
+        ACTIVE_STATE=$(systemctl show dlami-nvme | grep "ActiveState" | cut -d '=' -f 2)
+        RESULT_STATE=$(systemctl show dlami-nvme | grep "ExecMainStatus" | cut -d '=' -f 2)
+        
+        echo "dlami-nvme.service ActiveState: $ACTIVE_STATE"
+        echo "dlami-nvme.service ExecMainStatus: $RESULT_STATE"
+        
+        if [[ "$ACTIVE_STATE" == "active" && "$RESULT_STATE" == "0" ]]; then
+            echo "dlami-nvme.service is active and successful"
+            exit 0
+        fi
+        
+        ELAPSED_TIME=$((ELAPSED_TIME + CHECK_INTERVAL))
+        if [[ $ELAPSED_TIME -ge $MAX_WAIT_TIME ]]; then
+            echo "WARN: Timeout reached for dlami-nvme.service"
+            exit 0
+        fi
+        
+        sleep $CHECK_INTERVAL
+    done
+
+- name: Configure enroot for /opt/dlami/nvme
+  block:
+    - name: Update enroot.conf for dlami nvme
+      replace: 
+        path: /etc/enroot/enroot.conf
+        regexp: "{{ item.regexp }}"
+        replace: "{{ item.replace }}" 
+      loop:
+        - { regexp: '^(ENROOT_RUNTIME_PATH\s*).*$', replace: '\1/opt/dlami/nvme/tmp/enroot/user-$(id -u)' }
+        - { regexp: '^(ENROOT_CACHE_PATH\s*).*$', replace: '\1/opt/dlami/nvme/enroot' }
+        - { regexp: '^(ENROOT_DATA_PATH\s*).*$', replace: '\1/opt/dlami/nvme/tmp/enroot/data/user-$(id -u)' }
+        - { regexp: '^#(ENROOT_TEMP_PATH\s*).*$', replace: '\1/opt/dlami/nvme/tmp' }
+
+    - name: Create dlami nvme directories 
+      file:
+        path: "{{ item }}"
+        state: directory
+        mode: '1777'
+      loop: 
+        - /opt/dlami/nvme/tmp/enroot
+        - /opt/dlami/nvme/tmp/enroot/data
+        - /opt/dlami/nvme/enroot
+        - /opt/dlami/nvme/tmp
+  when: ansible_mounts | selectattr('mount', 'equalto', '/opt/dlami/nvme') | list | length > 0
+
+- name: Configure enroot for /opt/sagemaker 
+  block: 
+    - name: Update enroot.conf for sagemaker
+      replace: 
+        path: /etc/enroot/enroot.conf
+        regexp: "{{ item.regexp }}"
+        replace: "{{ item.replace }}" 
+      loop:
+        - { regexp: '^(ENROOT_RUNTIME_PATH\s*).*$', replace: '\1/opt/sagemaker/tmp/enroot/user-$(id -u)' }
+        - { regexp: '^(ENROOT_CACHE_PATH\s*).*$', replace: '\1/opt/sagemaker/enroot' }
+        - { regexp: '^(ENROOT_DATA_PATH\s*).*$', replace: '\1/opt/sagemaker/tmp/enroot/data/user-$(id -u)' }
+        - { regexp: '^#(ENROOT_TEMP_PATH\s*).*$', replace: '\1/opt/sagemaker/tmp' }
+
+    - name: Create sagemaker directories 
+      file:
+        path: "{{ item }}"
+        state: directory
+        mode: '1777'
+      loop: 
+        - /opt/sagemaker/tmp/enroot
+        - /opt/sagemaker/tmp/enroot/data
+        - /opt/sagemaker/enroot
+        - /opt/sagemaker/tmp
+  when: 
+    - ansible_mounts | selectattr('mount', 'equalto', '/opt/sagemaker') | list | length > 0
+    - ansible_mounts | selectattr('mount', 'equalto', '/opt/dlami/nvme') | list | length == 0
+
+- name: Configure FSx for enroot cache, if available 
+  block:
+    - name: Update enroot.conf for fsx
+      replace: 
+        path: /etc/enroot/enroot.conf
+        regexp: '^(ENROOT_CACHE_PATH\s*).*$'
+        replace: '\1/fsx/enroot'
+
+    - name: Create fsx directories 
+      file:
+        path: /fsx/enroot
+        state: directory
+        mode: '1777'
+  when: ansible_mounts | selectattr('mount', 'equalto', '/fsx') | list | length > 0

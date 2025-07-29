@@ -257,7 +257,8 @@ def main(args):
         # Install Docker/Enroot/Pyxis
         if Config.enable_docker_enroot_pyxis:
             # ExecuteBashScript("./utils/install_docker.sh").run()
-            ExecuteBashScript("./utils/install_enroot_pyxis.sh").run(node_type)
+            # ExecuteBashScript("./utils/install_enroot_pyxis.sh").run(node_type)
+            print("Skipping since already done in Ansible!")
 
         # Update Neuron SDK version to the version defined in update_neuron_sdk.sh
         if Config.enable_update_neuron_sdk:

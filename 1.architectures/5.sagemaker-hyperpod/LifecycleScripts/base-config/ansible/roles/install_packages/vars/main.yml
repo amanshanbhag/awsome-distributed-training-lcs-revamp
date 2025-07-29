@@ -1,3 +1,7 @@
 ---
 nvidia_container_tlk_version: "1.17.6-1"
 ansible_pip_version: "10.7.0"
+pyxis_version: "v0.19.0"
+enroot_version: "3.4.1"
+slurm_install_dir: "/opt/slurm"
+pyxis_tmp_dir: "/tmp/pyxis"
