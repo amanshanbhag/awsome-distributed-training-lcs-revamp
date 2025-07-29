@@ -117,34 +117,50 @@
     state: link
     force: yes
 
-- name: Wait for dlami-nvme service
-  shell: |
-    MAX_WAIT_TIME=120
-    ELAPSED_TIME=0
-    CHECK_INTERVAL=5
+# - name: Wait for dlami-nvme service
+#   shell: |
+#     MAX_WAIT_TIME=120
+#     ELAPSED_TIME=0
+#     CHECK_INTERVAL=5
     
-    while true; do
+#     while true; do
+#         ACTIVE_STATE=$(systemctl show dlami-nvme | grep "ActiveState" | cut -d '=' -f 2)
+#         RESULT_STATE=$(systemctl show dlami-nvme | grep "ExecMainStatus" | cut -d '=' -f 2)
+        
+#         echo "dlami-nvme.service ActiveState: $ACTIVE_STATE"
+#         echo "dlami-nvme.service ExecMainStatus: $RESULT_STATE"
+        
+#         if [[ "$ACTIVE_STATE" == "active" && "$RESULT_STATE" == "0" ]]; then
+#             echo "dlami-nvme.service is active and successful"
+#             exit 0
+#         fi
+        
+#         ELAPSED_TIME=$((ELAPSED_TIME + CHECK_INTERVAL))
+#         if [[ $ELAPSED_TIME -ge $MAX_WAIT_TIME ]]; then
+#             echo "WARN: Timeout reached for dlami-nvme.service"
+#             exit 0
+#         fi
+        
+#         sleep $CHECK_INTERVAL
+#     done
+#   async: 150
+#   poll: 5
+
+- name: Check dlami-nvme service status
+  shell: |
+    if systemctl list-units --all | grep -q dlami-nvme; then
         ACTIVE_STATE=$(systemctl show dlami-nvme | grep "ActiveState" | cut -d '=' -f 2)
         RESULT_STATE=$(systemctl show dlami-nvme | grep "ExecMainStatus" | cut -d '=' -f 2)
-        
-        echo "dlami-nvme.service ActiveState: $ACTIVE_STATE"
-        echo "dlami-nvme.service ExecMainStatus: $RESULT_STATE"
-        
-        if [[ "$ACTIVE_STATE" == "active" && "$RESULT_STATE" == "0" ]]; then
-            echo "dlami-nvme.service is active and successful"
-            exit 0
-        fi
-        
-        ELAPSED_TIME=$((ELAPSED_TIME + CHECK_INTERVAL))
-        if [[ $ELAPSED_TIME -ge $MAX_WAIT_TIME ]]; then
-            echo "WARN: Timeout reached for dlami-nvme.service"
-            exit 0
-        fi
-        
-        sleep $CHECK_INTERVAL
-    done
-  async: 150
-  poll: 5
+        echo "dlami-nvme.service ActiveState: $ACTIVE_STATE, ExecMainStatus: $RESULT_STATE"
+    else
+        echo "dlami-nvme.service does not exist"
+    fi
+  register: dlami_status
+  failed_when: false
+
+- name: Debug dlami-nvme status
+  debug:
+    msg: "{{ dlami_status.stdout }}"
 
 - name: Configure enroot for /opt/dlami/nvme
   block:
