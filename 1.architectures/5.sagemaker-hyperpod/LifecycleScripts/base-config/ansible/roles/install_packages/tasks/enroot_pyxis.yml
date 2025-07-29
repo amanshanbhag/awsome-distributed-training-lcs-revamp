@@ -84,7 +84,7 @@
 
 - name: Copy enroot configuration
   copy:
-    src: "{{ role_dir }}/files/enroot.conf"
+    src: "{{ role_path }}/files/enroot.conf"
     dest: /etc/enroot/enroot.conf
     mode: '0644'
 
