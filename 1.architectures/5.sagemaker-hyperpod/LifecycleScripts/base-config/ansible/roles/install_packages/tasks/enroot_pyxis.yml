@@ -143,6 +143,8 @@
         
         sleep $CHECK_INTERVAL
     done
+  async: 150
+  poll: 5
 
 - name: Configure enroot for /opt/dlami/nvme
   block:
