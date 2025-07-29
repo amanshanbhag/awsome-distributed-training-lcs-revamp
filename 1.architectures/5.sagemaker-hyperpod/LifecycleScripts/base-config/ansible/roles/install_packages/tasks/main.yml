@@ -29,6 +29,11 @@
     config.enable_observability | bool and 
     node_role == "compute"
 
+- name: Log skipped Docker installation for observability on Compute Node
+  debug:
+    msg: "[LOG] SKIPPING Docker installation for observability on Compute Node - workload_manager not slurm or observability disabled"
+  when: not (workload_manager == "slurm" and config.enable_observability | bool and node_role == "compute")
+
 - name: Include Docker installation task for observability (Controller Node)
   include_tasks: docker.yml
   when: >
@@ -37,11 +42,25 @@
     node_role == "controller" and 
     scontrol_ready | default(false) | bool
 
+- name: Log skipped Docker installation for observability on Controller Node
+  debug:
+    msg: "[LOG] SKIPPING Docker installation for observability on Controller Node - scontrol not ready"
+  when: >
+    workload_manager == "slurm" and 
+    config.enable_observability | bool and 
+    node_role == "controller" and 
+    not (scontrol_ready | default(false) | bool)
+
 - name: Include Docker installation task for Docker/Enroot/Pyxis (All Nodes)
   include_tasks: docker.yml
   when: >
     workload_manager == "slurm" and 
     config.enable_docker_enroot_pyxis | bool
+
+- name: Log skipped Docker installation for Docker/Enroot/Pyxis
+  debug:
+    msg: "[LOG] SKIPPING Docker installation for Docker/Enroot/Pyxis - workload_manager not slurm or feature disabled"
+  when: not (workload_manager == "slurm" and config.enable_docker_enroot_pyxis | bool)
 
 - name: Include Enroot/Pyxis installation task (Controller Nodes)
   include_tasks: enroot_pyxis.yml
@@ -49,6 +68,11 @@
     workload_manager == "slurm" and
     config.enable_docker_enroot_pyxis | bool and 
     node_role == "controller"
+
+- name: Log skipped Enroot/Pyxis installation on Controller Nodes
+  debug:
+    msg: "[LOG] SKIPPING Enroot/Pyxis installation on Controller Node - workload_manager not slurm, feature disabled, or not controller node"
+  when: not (workload_manager == "slurm" and config.enable_docker_enroot_pyxis | bool and node_role == "controller")
 
 - name: Restart slurmctld on Controller Nodes
   ansible.builtin.systemd:
@@ -73,6 +97,11 @@
     workload_manager == "slurm" and
     config.enable_docker_enroot_pyxis | bool and 
     node_role != "controller"
+
+- name: Log skipped Enroot/Pyxis installation on Compute/Login Nodes
+  debug:
+    msg: "[LOG] SKIPPING Enroot/Pyxis installation on Compute/Login Node - workload_manager not slurm, feature disabled, or is controller node"
+  when: not (workload_manager == "slurm" and config.enable_docker_enroot_pyxis | bool and node_role != "controller")
 
 - name: Restart slurmd on Compute Nodes
   ansible.builtin.systemd:
